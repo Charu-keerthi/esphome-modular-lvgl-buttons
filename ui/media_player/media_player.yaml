@@ -222,6 +222,26 @@ text_sensor:
       - script.execute: update_media_ui
 
 lvgl:
+  style_definitions:
+    - id: card_style
+      bg_color: 0x1E293B
+      bg_opa: COVER
+      radius: 20
+      border_width: 0
+      pad_all: 12
+
+    - id: action_style
+      bg_color: 0x2563EB
+      bg_opa: COVER
+      radius: 18
+      border_width: 0
+
+    - id: media_button_style
+      bg_color: 0x334155
+      bg_opa: COVER
+      radius: 16
+      border_width: 0
+      
   color_depth: 16
   buffer_size: 12%
   default_font: montserrat_14
@@ -449,23 +469,3 @@ lvgl:
               - script.execute: media_volume_increase_5
 
       <<: !include ../../common/swipe_navigation.yaml
-
-font:
-  - file: "https://github.com/Templarian/MaterialDesign-Webfont/raw/v7.4.47/fonts/materialdesignicons-webfont.ttf"
-    id: mdi_icons_40
-    size: 40
-    bpp: 8
-    glyphs:
-      # Music Player icons
-
-      - $mdi_play
-      - $mdi_pause 
-      - $mdi_skip_next 
-      - $mdi_skip_previous                                                                                                 
-      # - $mdi_shuffle 
-      # - $mdi_repeat 
-      # - $mdi_repeat_once                                                                                                               
-      - $mdi_volume_high 
-      - $mdi_volume_low
-      - $mdi_music_note
-      - $mdi_home
