@@ -88,11 +88,11 @@ script:
             entity_id: ${media_player_entity}
           data_template:
             volume_level: "{{ vol }}"
-    variables:
-      vol: !lambda |-
-        float v = (float)id(media_volume_pct) / 100.0f + 0.05f;
-        if (v > 1.0f) v = 1.0f;
-        return v;
+          variables:
+            vol: !lambda |-
+              float v = (float)id(media_volume_pct) / 100.0f + 0.05f;
+              if (v > 1.0f) v = 1.0f;
+              return v;
 
   - id: media_volume_decrease_5
     then:
@@ -102,11 +102,11 @@ script:
             entity_id: ${media_player_entity}
           data_template:
             volume_level: "{{ vol }}"
-    variables:
-      vol: !lambda |-
-        float v = (float)id(media_volume_pct) / 100.0f - 0.05f;
-        if (v < 0.0f) v = 0.0f;
-        return v;
+          variables:
+            vol: !lambda |-
+              float v = (float)id(media_volume_pct) / 100.0f - 0.05f;
+              if (v < 0.0f) v = 0.0f;
+              return v;
 
 interval:
   - interval: 1s
