@@ -1,0 +1,471 @@
+globals:
+  - id: media_elapsed_s
+    type: int
+    restore_value: no
+    initial_value: '0'
+
+  - id: media_duration_s
+    type: int
+    restore_value: no
+    initial_value: '0'
+
+  - id: media_volume_pct
+    type: int
+    restore_value: no
+    initial_value: '0'
+
+  - id: media_is_playing
+    type: bool
+    restore_value: no
+    initial_value: 'false'
+
+online_image:
+  - id: album_art
+    url: ${album_placeholder_url}
+    format: JPEG   # Change to PNG if your Home Assistant artwork endpoint serves PNG
+    buffer_size: 65536  # increase download buffer to 65 KB
+    type: RGB565
+    resize: 180x180
+    update_interval: never
+    # request_headers:
+    #   Authorization: Bearer ${ha_token}
+    on_download_finished:
+      - lvgl.image.update:
+          id: cover_art_image
+          src: album_art
+      - logger.log:
+          level: DEBUG
+          format: "Cover art image successfully set for id=cover_art_image"
+    # on_error:
+    #   - logger.log:
+    #       level: ERROR
+    #       format: "Failed to download album art or set cover_art_image for id=cover_art_image"
+    #   # - lvgl.widget.redraw:
+    #   #     id: cover_art_image
+
+script:
+  - id: update_media_ui
+    mode: restart
+    then:
+      - lvgl.label.update:
+          id: elapsed_label
+          text: !lambda |-
+            int s = id(media_elapsed_s);
+            char buf[8];
+            snprintf(buf, sizeof(buf), "%02d:%02d", s / 60, s % 60);
+            return std::string(buf);
+
+      - lvgl.label.update:
+          id: remaining_label
+          text: !lambda |-
+            int remain = id(media_duration_s) - id(media_elapsed_s);
+            if (remain < 0) remain = 0;
+            char buf[10];
+            snprintf(buf, sizeof(buf), "-%02d:%02d", remain / 60, remain % 60);
+            return std::string(buf);
+
+      - lvgl.label.update:
+          id: volume_value
+          text: !lambda |-
+            char buf[8];
+            snprintf(buf, sizeof(buf), "%d%%", id(media_volume_pct));
+            return std::string(buf);
+
+      - lvgl.bar.update:
+          id: song_progress
+          value: !lambda |-
+            if (id(media_duration_s) <= 0) return 0;
+            int value = (id(media_elapsed_s) * 1000) / id(media_duration_s);
+            if (value < 0) value = 0;
+            if (value > 1000) value = 1000;
+            return value;
+
+  - id: media_volume_increase_5
+    then:
+      - homeassistant.action:
+          action: media_player.volume_set
+          data:
+            entity_id: ${media_player_entity}
+          data_template:
+            volume_level: "{{ vol }}"
+    variables:
+      vol: !lambda |-
+        float v = (float)id(media_volume_pct) / 100.0f + 0.05f;
+        if (v > 1.0f) v = 1.0f;
+        return v;
+
+  - id: media_volume_decrease_5
+    then:
+      - homeassistant.action:
+          action: media_player.volume_set
+          data:
+            entity_id: ${media_player_entity}
+          data_template:
+            volume_level: "{{ vol }}"
+    variables:
+      vol: !lambda |-
+        float v = (float)id(media_volume_pct) / 100.0f - 0.05f;
+        if (v < 0.0f) v = 0.0f;
+        return v;
+
+interval:
+  - interval: 1s
+    then:
+      - if:
+          condition:
+            lambda: return id(media_is_playing) && id(media_duration_s) > 0 && id(media_elapsed_s) < id(media_duration_s);
+          then:
+            - lambda: |-
+                id(media_elapsed_s)++;
+            - script.execute: update_media_ui
+
+text_sensor:
+
+  - platform: homeassistant
+    id: media_state
+    entity_id: ${media_player_entity}
+    on_value:
+      - lambda: |-
+          id(media_is_playing) = (x == "playing");
+      - lvgl.label.update:
+          id: transport_state
+          text: !lambda |-
+            return x.empty() ? std::string("idle") : x;
+
+  - platform: homeassistant
+    id: media_title
+    entity_id: ${media_player_entity}
+    attribute: media_title
+    on_value:
+      - lvgl.label.update:
+          id: song_title_label
+          text: !lambda |-
+            return x.empty() ? std::string("Nothing playing") : x;
+
+  - platform: homeassistant
+    id: media_artist
+    entity_id: ${media_player_entity}
+    attribute: media_artist
+    on_value:
+      - lvgl.label.update:
+          id: song_artist_label
+          text: !lambda |-
+            return x.empty() ? std::string("Unknown artist") : x;
+
+  - platform: homeassistant
+    id: media_art_url
+    entity_id: ${media_player_entity}
+    attribute: entity_picture
+    on_value:
+      - if:
+          condition:
+            lambda: return !x.empty();
+          then:
+            - online_image.set_url:
+                id: album_art
+                url: !lambda |-
+                  if (x.rfind("http://", 0) == 0 || x.rfind("https://", 0) == 0) {
+                    return x;
+                  }
+                  return std::string("${ha_base_url}") + x;
+                update: true
+          else:
+            - online_image.set_url:
+                id: album_art
+                url: ${album_placeholder_url}
+                update: true
+
+  - platform: homeassistant
+    id: media_position_text
+    entity_id: ${media_player_entity}
+    attribute: media_position
+    on_value:
+      - lambda: |-
+          if (x.empty()) {
+            id(media_elapsed_s) = 0;
+          } else {
+            id(media_elapsed_s) = (int) atof(x.c_str());
+          }
+          if (id(media_elapsed_s) < 0) id(media_elapsed_s) = 0;
+      - script.execute: update_media_ui
+
+  - platform: homeassistant
+    id: media_duration_text
+    entity_id: ${media_player_entity}
+    attribute: media_duration
+    on_value:
+      - lambda: |-
+          if (x.empty()) {
+            id(media_duration_s) = 0;
+          } else {
+            id(media_duration_s) = (int) atof(x.c_str());
+          }
+          if (id(media_duration_s) < 0) id(media_duration_s) = 0;
+          if (id(media_elapsed_s) > id(media_duration_s)) {
+            id(media_elapsed_s) = id(media_duration_s);
+          }
+      - script.execute: update_media_ui
+
+  - platform: homeassistant
+    id: media_volume_text
+    entity_id: ${media_player_entity}
+    attribute: volume_level
+    on_value:
+      - lambda: |-
+          if (x.empty()) {
+            id(media_volume_pct) = 0;
+          } else {
+            id(media_volume_pct) = (int) (atof(x.c_str()) * 100.0f + 0.5f);
+          }
+          if (id(media_volume_pct) < 0) id(media_volume_pct) = 0;
+          if (id(media_volume_pct) > 100) id(media_volume_pct) = 100;
+      - script.execute: update_media_ui
+
+lvgl:
+  color_depth: 16
+  buffer_size: 12%
+  default_font: montserrat_14
+  resume_on_input: true
+  theme:
+    dark_mode: true
+
+  pages:
+    - id: music_page
+      bg_color: 0x0F172A
+      bg_opa: COVER
+      widgets:
+        - button:
+            x: 20
+            y: 16
+            width: 90
+            height: 38
+            styles: [media_button_style]
+            widgets:
+              - label:
+                  text_font: mdi_icons_40
+                  align: center
+                  text: "$mdi_home"
+            on_click:
+              - lvgl.page.show: main_page
+
+        - label:
+            x: 128
+            y: 22
+            text: "Now Playing"
+            text_font: montserrat_24
+
+        - obj:
+            x: 20
+            y: 66
+            width: 190
+            height: 190
+            styles: [card_style]
+            widgets:
+              - image:
+                  id: cover_art_image
+                  x: 0
+                  y: 0
+                  width: 190
+                  height: 190
+                  radius: 20
+                  src: album_art
+
+        - obj:
+            x: 224
+            y: 66
+            width: 236
+            height: 190
+            styles: [card_style]
+            pad_all: 12
+            widgets:
+              - label:
+                  id: song_title_label
+                  x: 0
+                  y: 0
+                  width: 212
+                  text: "Nothing playing"
+                  text_font: montserrat_22
+
+              - label:
+                  id: song_artist_label
+                  x: 0
+                  y: 52
+                  width: 212
+                  text: "Unknown artist"
+                  text_font: montserrat_18
+
+              - label:
+                  x: 0
+                  y: 108
+                  text: "State"
+                  text_font: montserrat_16
+
+              - label:
+                  id: transport_state
+                  x: 0
+                  y: 134
+                  width: 212
+                  text: "idle"
+                  text_font: montserrat_18
+
+        - bar:
+            id: song_progress
+            x: 24
+            y: 278
+            width: 432
+            height: 16
+            min_value: 0
+            max_value: 1000
+            value: 0
+            bg_color: 0x1E293B
+            bg_opa: COVER
+            radius: 10
+            indicator:
+              bg_color: 0x22C55E
+              bg_opa: COVER
+              radius: 10
+
+        - label:
+            id: elapsed_label
+            x: 24
+            y: 302
+            text: "00:00"
+            text_font: montserrat_16
+
+        - label:
+            id: remaining_label
+            x: 390
+            y: 302
+            text: "-00:00"
+            text_font: montserrat_16
+
+        - label:
+            x: 24
+            y: 328
+            text: "Volume"
+            text_font: montserrat_16
+
+        - label:
+            id: volume_value
+            x: 98
+            y: 328
+            text: "0%"
+            text_font: montserrat_16
+
+        - button:
+            x: 20
+            y: 356
+            width: 95
+            height: 54
+            styles: [media_button_style]
+            widgets:
+              - label:
+                  text_font: mdi_icons_40
+                  align: center
+                  text: "$mdi_skip_previous"
+            on_click:
+              - homeassistant.service:
+                  service: media_player.media_previous_track
+                  data:
+                    entity_id: ${media_player_entity}
+
+        - button:
+            x: 135
+            y: 356
+            width: 95
+            height: 54
+            styles: [action_style]
+            widgets:
+              - label:
+                  text_font: mdi_icons_40
+                  align: center
+                  text: "$mdi_play"
+            on_click:
+              - homeassistant.service:
+                  service: media_player.media_play
+                  data:
+                    entity_id: ${media_player_entity}
+
+        - button:
+            x: 250
+            y: 356
+            width: 95
+            height: 54
+            styles: [action_style]
+            widgets:
+              - label:
+                  text_font: mdi_icons_40
+                  align: center
+                  text: "$mdi_pause"
+            on_click:
+              - homeassistant.service:
+                  service: media_player.media_pause
+                  data:
+                    entity_id: ${media_player_entity}
+
+        - button:
+            x: 365
+            y: 356
+            width: 95
+            height: 54
+            styles: [media_button_style]
+            widgets:
+              - label:
+                  text_font: mdi_icons_40
+                  align: center
+                  text: "$mdi_skip_next"
+            on_click:
+              - homeassistant.service:
+                  service: media_player.media_next_track
+                  data:
+                    entity_id: ${media_player_entity}
+
+        - button:
+            x: 20
+            y: 424
+            width: 210
+            height: 40
+            styles: [media_button_style]
+            widgets:
+              - label:
+                  text_font: mdi_icons_40
+                  align: center
+                  text: "$mdi_volume_low"
+            on_click:
+              - script.execute: media_volume_decrease_5
+
+        - button:
+            x: 250
+            y: 424
+            width: 210
+            height: 40
+            styles: [media_button_style]
+            widgets:
+              - label:
+                  text_font: mdi_icons_40
+                  align: center
+                  text: "$mdi_volume_high"
+            on_click:
+              - script.execute: media_volume_increase_5
+
+      <<: !include ../../common/swipe_navigation.yaml
+
+font:
+  - file: "https://github.com/Templarian/MaterialDesign-Webfont/raw/v7.4.47/fonts/materialdesignicons-webfont.ttf"
+    id: mdi_icons_40
+    size: 40
+    bpp: 8
+    glyphs:
+      # Music Player icons
+
+      - $mdi_play
+      - $mdi_pause 
+      - $mdi_skip_next 
+      - $mdi_skip_previous                                                                                                 
+      # - $mdi_shuffle 
+      # - $mdi_repeat 
+      # - $mdi_repeat_once                                                                                                               
+      - $mdi_volume_high 
+      - $mdi_volume_low
+      - $mdi_music_note
+      - $mdi_home
