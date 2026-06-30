@@ -1,3 +1,11 @@
+packages:
+  # Music Assistant queue popup (defines popup_queue, mp_fetch_queue, globals).
+  # Requires the device config to also include ui/popup/popup_system.yaml (the
+  # standard device hosts already do) — queue_popup extends its popup_close
+  # script and renders above its popup_scrim. Do NOT include popup_system here
+  # as well, or popup_scrim/scripts would be defined twice.
+  queue_popup: !include ../popup/queue_popup.yaml
+
 globals:
   - id: media_elapsed_s
     type: int
@@ -246,8 +254,6 @@ lvgl:
   buffer_size: 12%
   default_font: montserrat_14
   resume_on_input: true
-  theme:
-    dark_mode: true
 
   pages:
     - id: music_page
@@ -267,6 +273,28 @@ lvgl:
                   text: "$mdi_home"
             on_click:
               - lvgl.page.show: main_page
+
+        # Queue button — top right. Opens the Music Assistant queue popup.
+        # Uses a text label to avoid depending on an MDI glyph being bundled in
+        # the device font; swap to `text_font: mdi_icons_40` + "$mdi_playlist_music"
+        # if that glyph is in your device's font glyph list.
+        - button:
+            align: top_right
+            x: -20
+            y: 16
+            width: 96
+            height: 38
+            styles: [media_button_style]
+            widgets:
+              - label:
+                  align: center
+                  text: "Queue"
+                  text_font: montserrat_16
+            on_short_click:
+              - script.execute: mp_fetch_queue
+              - lvgl.widget.show: popup_scrim
+              - lvgl.widget.show: popup_queue
+              - script.execute: popup_start_timeout
 
         - label:
             x: 128
