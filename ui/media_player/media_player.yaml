@@ -265,7 +265,7 @@ lvgl:
             y: 16
             width: 90
             height: 38
-            styles: [media_button_style]
+            styles: [action_style]
             widgets:
               - label:
                   text_font: mdi_icons_40
@@ -284,7 +284,7 @@ lvgl:
             y: 16
             width: 96
             height: 38
-            styles: [media_button_style]
+            styles: [action_style]
             widgets:
               - label:
                   align: center
@@ -428,7 +428,7 @@ lvgl:
             y: 356
             width: 95
             height: 54
-            styles: [media_button_style]
+            styles: [action_style]
             widgets:
               - label:
                   text_font: mdi_icons_40
@@ -445,7 +445,7 @@ lvgl:
             y: 356
             width: 95
             height: 54
-            styles: [media_button_style]
+            styles: [action_style]
             widgets:
               - label:
                   text_font: mdi_icons_40
