@@ -333,6 +333,8 @@ lvgl:
                   x: 0
                   y: 0
                   width: 212
+                  height: 30         # bound to one line so long_mode:dot truncates instead of wrapping
+                  long_mode: dot     # truncate long titles with an ellipsis instead of wrapping
                   text: "Nothing playing"
                   text_font: montserrat_22
 
@@ -341,6 +343,8 @@ lvgl:
                   x: 0
                   y: 52
                   width: 212
+                  height: 26         # bound to one line so long_mode:dot truncates instead of wrapping
+                  long_mode: dot     # truncate long artist names so they don't overrun the State label
                   text: "Unknown artist"
                   text_font: montserrat_18
 
@@ -424,7 +428,7 @@ lvgl:
             y: 356
             width: 95
             height: 54
-            styles: [action_style]
+            styles: [media_button_style]
             widgets:
               - label:
                   text_font: mdi_icons_40
@@ -441,7 +445,7 @@ lvgl:
             y: 356
             width: 95
             height: 54
-            styles: [action_style]
+            styles: [media_button_style]
             widgets:
               - label:
                   text_font: mdi_icons_40

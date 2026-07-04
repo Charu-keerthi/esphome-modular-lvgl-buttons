@@ -1,15 +1,16 @@
 ---
 # Music Assistant queue popup for the media player page.
 #
-# Opens a near-full-screen modal listing up to 10 upcoming queue items in two
-# columns of five. Tapping an item plays it. Closes via the "X" button, a tap
-# outside (scrim), or the shared auto-close timeout.
+# Opens a near-full-screen modal listing up to 10 upcoming queue items in a
+# single scrollable column, each shown as "Title - Artist". Tapping an item
+# plays it. Closes via the "X" button, a tap outside (scrim), or the shared
+# auto-close timeout.
 #
 # Data path (no Home Assistant helper required):
 #   mp_fetch_queue calls the `mass_queue.get_queue_items` action with
-#   capture_response, flattens the queue to flat keys (t0..t9 titles,
-#   q0..q9 queue_item_ids) in the response_template, and pushes them into the
-#   LVGL labels / id globals in on_success. Same mechanism as ui/weather/forecast.yaml.
+#   capture_response, flattens the queue to a small JSON array of
+#   {t: "Title - Artist", q: queue_item_id} in the response_template, and pushes
+#   the labels / id globals in on_success. Same mechanism as ui/weather/forecast.yaml.
 #
 # Requires (supplied by the including page / device config):
 #   ${media_player_entity}  - the Music Assistant media_player entity_id
@@ -109,14 +110,18 @@ script:
           data:
             entity: ${media_player_entity}
           capture_response: true
-          # Flatten the queue to a small JSON array of {t: title, q: queue_item_id}.
+          # Flatten the queue to a small JSON array of {t: "Title - Artist", q: id}.
           # Kept to single-line Jinja statements so the folded (>-) scalar renders
-          # cleanly. `| default([], true)` guards an empty/idle queue.
+          # cleanly. `| default([], true)` guards an empty/idle queue. Artist is
+          # appended only when present, so title-only items don't get a dangling " - ".
           response_template: >-
             {% set items = response["${media_player_entity}"] | default([], true) %}
             {% set ns = namespace(r=[]) %}
             {% for it in items[:10] %}
-            {% set ns.r = ns.r + [{'t': it.media_title | default(''), 'q': it.queue_item_id | default('')}] %}
+            {% set title = it.media_title | default('') %}
+            {% set artist = it.media_artist | default('') %}
+            {% set label = title ~ ' - ' ~ artist if artist else title %}
+            {% set ns.r = ns.r + [{'t': label, 'q': it.queue_item_id | default('')}] %}
             {% endfor %}
             {{ ns.r | tojson }}
           on_success:
@@ -212,7 +217,9 @@ lvgl:
                 on_click:
                   - script.execute: popup_close
 
-            # Two-column x five-row grid of queue rows, below the header.
+            # Single scrollable column of queue rows, below the header. The
+            # container overflows vertically once more than a few rows are shown,
+            # so scrollable: true lets the user scroll through all 10 items.
             - obj:
                 align: bottom_mid
                 width: 100%
@@ -220,23 +227,20 @@ lvgl:
                 bg_opa: TRANSP
                 border_width: 0
                 pad_all: 0
-                scrollable: false
+                pad_right: 6          # room for the scrollbar so it doesn't overlap text
+                scrollable: true
+                scrollbar_mode: AUTO
                 layout:
-                  type: GRID
-                  grid_columns: [FR(1), FR(1)]
-                  grid_rows: [FR(1), FR(1), FR(1), FR(1), FR(1)]
-                  pad_column: 8
+                  type: FLEX
+                  flex_flow: COLUMN
                   pad_row: 6
                 widgets:
-                  # Column 0 — rows 0..4 (items 0..4)
                   - button:
                       id: queue_btn_0
                       hidden: true
                       styles: [queue_row_style]
-                      grid_cell_column_pos: 0
-                      grid_cell_row_pos: 0
-                      grid_cell_x_align: stretch
-                      grid_cell_y_align: stretch
+                      width: 100%
+                      height: 52
                       widgets:
                         - label:
                             id: queue_item_0
@@ -252,10 +256,8 @@ lvgl:
                       id: queue_btn_1
                       hidden: true
                       styles: [queue_row_style]
-                      grid_cell_column_pos: 0
-                      grid_cell_row_pos: 1
-                      grid_cell_x_align: stretch
-                      grid_cell_y_align: stretch
+                      width: 100%
+                      height: 52
                       widgets:
                         - label:
                             id: queue_item_1
@@ -271,10 +273,8 @@ lvgl:
                       id: queue_btn_2
                       hidden: true
                       styles: [queue_row_style]
-                      grid_cell_column_pos: 0
-                      grid_cell_row_pos: 2
-                      grid_cell_x_align: stretch
-                      grid_cell_y_align: stretch
+                      width: 100%
+                      height: 52
                       widgets:
                         - label:
                             id: queue_item_2
@@ -290,10 +290,8 @@ lvgl:
                       id: queue_btn_3
                       hidden: true
                       styles: [queue_row_style]
-                      grid_cell_column_pos: 0
-                      grid_cell_row_pos: 3
-                      grid_cell_x_align: stretch
-                      grid_cell_y_align: stretch
+                      width: 100%
+                      height: 52
                       widgets:
                         - label:
                             id: queue_item_3
@@ -309,10 +307,8 @@ lvgl:
                       id: queue_btn_4
                       hidden: true
                       styles: [queue_row_style]
-                      grid_cell_column_pos: 0
-                      grid_cell_row_pos: 4
-                      grid_cell_x_align: stretch
-                      grid_cell_y_align: stretch
+                      width: 100%
+                      height: 52
                       widgets:
                         - label:
                             id: queue_item_4
@@ -324,15 +320,12 @@ lvgl:
                       on_click:
                         - lambda: 'id(mp_selected_qid) = id(mp_qid_4);'
                         - script.execute: mp_play_item
-                  # Column 1 — rows 0..4 (items 5..9)
                   - button:
                       id: queue_btn_5
                       hidden: true
                       styles: [queue_row_style]
-                      grid_cell_column_pos: 1
-                      grid_cell_row_pos: 0
-                      grid_cell_x_align: stretch
-                      grid_cell_y_align: stretch
+                      width: 100%
+                      height: 52
                       widgets:
                         - label:
                             id: queue_item_5
@@ -348,10 +341,8 @@ lvgl:
                       id: queue_btn_6
                       hidden: true
                       styles: [queue_row_style]
-                      grid_cell_column_pos: 1
-                      grid_cell_row_pos: 1
-                      grid_cell_x_align: stretch
-                      grid_cell_y_align: stretch
+                      width: 100%
+                      height: 52
                       widgets:
                         - label:
                             id: queue_item_6
@@ -367,10 +358,8 @@ lvgl:
                       id: queue_btn_7
                       hidden: true
                       styles: [queue_row_style]
-                      grid_cell_column_pos: 1
-                      grid_cell_row_pos: 2
-                      grid_cell_x_align: stretch
-                      grid_cell_y_align: stretch
+                      width: 100%
+                      height: 52
                       widgets:
                         - label:
                             id: queue_item_7
@@ -386,10 +375,8 @@ lvgl:
                       id: queue_btn_8
                       hidden: true
                       styles: [queue_row_style]
-                      grid_cell_column_pos: 1
-                      grid_cell_row_pos: 3
-                      grid_cell_x_align: stretch
-                      grid_cell_y_align: stretch
+                      width: 100%
+                      height: 52
                       widgets:
                         - label:
                             id: queue_item_8
@@ -405,10 +392,8 @@ lvgl:
                       id: queue_btn_9
                       hidden: true
                       styles: [queue_row_style]
-                      grid_cell_column_pos: 1
-                      grid_cell_row_pos: 4
-                      grid_cell_x_align: stretch
-                      grid_cell_y_align: stretch
+                      width: 100%
+                      height: 52
                       widgets:
                         - label:
                             id: queue_item_9

@@ -3,12 +3,14 @@
 on_swipe_right:
     - lambda: 'lv_indev_wait_release(lv_indev_get_act());'
     - logger.log: "Swipe right"
-    - lvgl.page.next:
+    # Swipe right -> previous page (index - 1)
+    - lvgl.page.previous:
           animation: OUT_RIGHT
           time: 300ms
 on_swipe_left:
     - lambda: 'lv_indev_wait_release(lv_indev_get_act());'
     - logger.log: "Swipe left"
-    - lvgl.page.previous:
+    # Swipe left -> next page (index + 1)
+    - lvgl.page.next:
           animation: OUT_LEFT
           time: 300ms
