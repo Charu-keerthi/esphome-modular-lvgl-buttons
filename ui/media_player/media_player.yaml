@@ -160,6 +160,15 @@ text_sensor:
           text: !lambda |-
             return x.empty() ? std::string("Unknown artist") : x;
 
+  # Track the currently-playing media_content_id so the queue popup can
+  # highlight the matching row (queue_popup.yaml reads mp_now_content_id).
+  - platform: homeassistant
+    id: media_content_id
+    entity_id: ${media_player_entity}
+    attribute: media_content_id
+    on_value:
+      - lambda: 'id(mp_now_content_id) = x;'
+
   - platform: homeassistant
     id: media_art_url
     entity_id: ${media_player_entity}

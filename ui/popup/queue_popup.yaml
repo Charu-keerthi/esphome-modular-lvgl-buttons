@@ -73,6 +73,15 @@ globals:
     type: std::string
     restore_value: no
     initial_value: '""'
+  # media_content_id of the track currently playing on ${media_player_entity}.
+  # Kept in sync by a homeassistant text_sensor in media_player.yaml. Read in
+  # mp_fetch_queue's on_success to highlight the matching queue row in green.
+  # (We match device-side because the response_template runs in HA's limited
+  # environment and cannot read entity attributes itself.)
+  - id: mp_now_content_id
+    type: std::string
+    restore_value: no
+    initial_value: '""'
 
 script:
   # Register with the shared close script so tap-outside / timeout also hides us.
@@ -114,6 +123,12 @@ script:
           # Kept to single-line Jinja statements so the folded (>-) scalar renders
           # cleanly. `| default([], true)` guards an empty/idle queue. Artist is
           # appended only when present, so title-only items don't get a dangling " - ".
+          # NOTE: this template is rendered by Home Assistant in a *limited*
+          # template environment (no state access). Do NOT call state_attr /
+          # states / now() here — they raise and the render returns empty
+          # (on_success then reports 0 items). We only emit `response` + item
+          # fields; the "currently playing" match is done device-side in
+          # on_success by comparing `i` (media_content_id) to mp_now_content_id.
           response_template: >-
             {% set items = response["${media_player_entity}"] | default([], true) %}
             {% set ns = namespace(r=[]) %}
@@ -121,7 +136,7 @@ script:
             {% set title = it.media_title | default('') %}
             {% set artist = it.media_artist | default('') %}
             {% set label = title ~ ' - ' ~ artist if artist else title %}
-            {% set ns.r = ns.r + [{'t': label, 'q': it.queue_item_id | default('')}] %}
+            {% set ns.r = ns.r + [{'t': label, 'q': it.queue_item_id | default(''), 'i': it.media_content_id | default('')}] %}
             {% endfor %}
             {{ ns.r | tojson }}
           on_success:
@@ -140,15 +155,27 @@ script:
                   &id(mp_qid_0), &id(mp_qid_1), &id(mp_qid_2), &id(mp_qid_3),
                   &id(mp_qid_4), &id(mp_qid_5), &id(mp_qid_6), &id(mp_qid_7),
                   &id(mp_qid_8), &id(mp_qid_9) };
+                std::string cur_id = id(mp_now_content_id);
+                bool matched = false;   // highlight only the first matching row
                 for (int i = 0; i < 10; i++) {
                   std::string title;
+                  bool current = false;
                   if (i < n) {
                     title = arr[i]["t"].as<std::string>();
                     *qids[i] = arr[i]["q"].as<std::string>();
+                    std::string item_id = arr[i]["i"].as<std::string>();
+                    if (!matched && !cur_id.empty() && item_id == cur_id) {
+                      current = true;
+                      matched = true;
+                    }
                   } else {
                     *qids[i] = "";
                   }
                   lv_label_set_text(lbls[i], title.c_str());
+                  // Highlight the currently-playing track in green; every other
+                  // row uses the default label color (reset each fetch).
+                  lv_obj_set_style_text_color(lbls[i],
+                      lv_color_hex(current ? 0x22C55E : 0xF2F0EB), LV_PART_MAIN);
                   // Hide empty rows so the popup only shows real queue items.
                   if (title.empty()) {
                     lv_obj_add_flag(btns[i], LV_OBJ_FLAG_HIDDEN);
@@ -240,12 +267,16 @@ lvgl:
                       hidden: true
                       styles: [queue_row_style]
                       width: 100%
-                      height: 52
+                      height: 76
                       widgets:
                         - label:
                             id: queue_item_0
                             align: left_mid
                             width: 100%
+                            # Bound to two lines of nunito_20 (~28px each) so long_mode:dot
+                            # wraps at most two lines and ellipsizes the rest instead of
+                            # overflowing the button with a third line.
+                            height: 56
                             long_mode: dot
                             text: ""
                             text_color: 0xF2F0EB
@@ -257,12 +288,16 @@ lvgl:
                       hidden: true
                       styles: [queue_row_style]
                       width: 100%
-                      height: 52
+                      height: 76
                       widgets:
                         - label:
                             id: queue_item_1
                             align: left_mid
                             width: 100%
+                            # Bound to two lines of nunito_20 (~28px each) so long_mode:dot
+                            # wraps at most two lines and ellipsizes the rest instead of
+                            # overflowing the button with a third line.
+                            height: 56
                             long_mode: dot
                             text: ""
                             text_color: 0xF2F0EB
@@ -274,12 +309,16 @@ lvgl:
                       hidden: true
                       styles: [queue_row_style]
                       width: 100%
-                      height: 52
+                      height: 76
                       widgets:
                         - label:
                             id: queue_item_2
                             align: left_mid
                             width: 100%
+                            # Bound to two lines of nunito_20 (~28px each) so long_mode:dot
+                            # wraps at most two lines and ellipsizes the rest instead of
+                            # overflowing the button with a third line.
+                            height: 56
                             long_mode: dot
                             text: ""
                             text_color: 0xF2F0EB
@@ -291,12 +330,16 @@ lvgl:
                       hidden: true
                       styles: [queue_row_style]
                       width: 100%
-                      height: 52
+                      height: 76
                       widgets:
                         - label:
                             id: queue_item_3
                             align: left_mid
                             width: 100%
+                            # Bound to two lines of nunito_20 (~28px each) so long_mode:dot
+                            # wraps at most two lines and ellipsizes the rest instead of
+                            # overflowing the button with a third line.
+                            height: 56
                             long_mode: dot
                             text: ""
                             text_color: 0xF2F0EB
@@ -308,12 +351,16 @@ lvgl:
                       hidden: true
                       styles: [queue_row_style]
                       width: 100%
-                      height: 52
+                      height: 76
                       widgets:
                         - label:
                             id: queue_item_4
                             align: left_mid
                             width: 100%
+                            # Bound to two lines of nunito_20 (~28px each) so long_mode:dot
+                            # wraps at most two lines and ellipsizes the rest instead of
+                            # overflowing the button with a third line.
+                            height: 56
                             long_mode: dot
                             text: ""
                             text_color: 0xF2F0EB
@@ -325,12 +372,16 @@ lvgl:
                       hidden: true
                       styles: [queue_row_style]
                       width: 100%
-                      height: 52
+                      height: 76
                       widgets:
                         - label:
                             id: queue_item_5
                             align: left_mid
                             width: 100%
+                            # Bound to two lines of nunito_20 (~28px each) so long_mode:dot
+                            # wraps at most two lines and ellipsizes the rest instead of
+                            # overflowing the button with a third line.
+                            height: 56
                             long_mode: dot
                             text: ""
                             text_color: 0xF2F0EB
@@ -342,12 +393,16 @@ lvgl:
                       hidden: true
                       styles: [queue_row_style]
                       width: 100%
-                      height: 52
+                      height: 76
                       widgets:
                         - label:
                             id: queue_item_6
                             align: left_mid
                             width: 100%
+                            # Bound to two lines of nunito_20 (~28px each) so long_mode:dot
+                            # wraps at most two lines and ellipsizes the rest instead of
+                            # overflowing the button with a third line.
+                            height: 56
                             long_mode: dot
                             text: ""
                             text_color: 0xF2F0EB
@@ -359,12 +414,16 @@ lvgl:
                       hidden: true
                       styles: [queue_row_style]
                       width: 100%
-                      height: 52
+                      height: 76
                       widgets:
                         - label:
                             id: queue_item_7
                             align: left_mid
                             width: 100%
+                            # Bound to two lines of nunito_20 (~28px each) so long_mode:dot
+                            # wraps at most two lines and ellipsizes the rest instead of
+                            # overflowing the button with a third line.
+                            height: 56
                             long_mode: dot
                             text: ""
                             text_color: 0xF2F0EB
@@ -376,12 +435,16 @@ lvgl:
                       hidden: true
                       styles: [queue_row_style]
                       width: 100%
-                      height: 52
+                      height: 76
                       widgets:
                         - label:
                             id: queue_item_8
                             align: left_mid
                             width: 100%
+                            # Bound to two lines of nunito_20 (~28px each) so long_mode:dot
+                            # wraps at most two lines and ellipsizes the rest instead of
+                            # overflowing the button with a third line.
+                            height: 56
                             long_mode: dot
                             text: ""
                             text_color: 0xF2F0EB
@@ -393,12 +456,16 @@ lvgl:
                       hidden: true
                       styles: [queue_row_style]
                       width: 100%
-                      height: 52
+                      height: 76
                       widgets:
                         - label:
                             id: queue_item_9
                             align: left_mid
                             width: 100%
+                            # Bound to two lines of nunito_20 (~28px each) so long_mode:dot
+                            # wraps at most two lines and ellipsizes the rest instead of
+                            # overflowing the button with a third line.
+                            height: 56
                             long_mode: dot
                             text: ""
                             text_color: 0xF2F0EB
