@@ -1,0 +1,525 @@
+# Calendar logic — rolling 5-week grid synced to a Home Assistant calendar
+# (e.g. a CalDAV/Radicale calendar), plus the per-day events popup.
+#
+# This file is HALF of the calendar feature; the page widget tree lives in
+# ui/calendar_page.yaml. ESPHome merges package lists as <packages> + <main
+# config>, so a page contributed here could never be positioned after a page
+# defined in the device yaml. The page is therefore included as a LIST ITEM:
+#
+#   packages:
+#     # after popup_system (popup z-order rule, see popup_system.yaml):
+#     calendar_logic: !include esphome-modular-lvgl-buttons/ui/calendar.yaml
+#
+#   lvgl:
+#     pages:
+#       # ... existing pages ...
+#       - !include esphome-modular-lvgl-buttons/ui/calendar_page.yaml
+#
+# Required substitutions (define in the device yaml):
+#   calendar_entity: HA calendar entity, e.g. calendar.charu_calendar
+#
+# Requires $mdi_home in the device's mdi_icons_40 font (already used by other
+# pages). The popup close button is a plain "X" label like queue_popup.yaml.
+#
+# Grid semantics: row 1 is always the current week (Monday start), plus the
+# next 4 weeks — today is always visible and no day is ever cut off. Days
+# outside the current month are dimmed; today gets the accent background.
+# Days with at least one event show a small dot (cal_fetch_dots). Tapping a
+# day opens popup_calendar with that day's events (cal_open_day).
+#
+# All calendar data flows through `homeassistant.action: calendar.get_events`
+# with capture_response — same mechanism as ui/weather/forecast.yaml.
+
+globals:
+  # Epoch of local midnight of the grid's first cell (Monday of the current
+  # week). 0 until the first successful render (time not yet synced).
+  - id: cal_grid_start
+    type: long
+    restore_value: no
+    initial_value: '0'
+  # Grid index (0-34) of the day the user tapped. Set by the cell's on_click,
+  # read by cal_open_day (same global-not-param pattern as queue_popup.yaml).
+  - id: cal_selected_idx
+    type: int
+    restore_value: no
+    initial_value: '0'
+
+# Re-render at 00:00:30 so the "today" highlight and window roll over at
+# midnight, mirroring the fetch cadence pattern in ui/weather/forecast.yaml.
+time:
+  - platform: homeassistant
+    on_time:
+      - hours: 0
+        minutes: 0
+        seconds: 30
+        then:
+          - script.execute: cal_render_grid
+          - script.execute: cal_fetch_dots
+
+interval:
+  - interval: 30min
+    then:
+      - script.execute: cal_fetch_dots
+
+api:
+  on_client_connected:
+    - if:
+        condition:
+          lambda: 'return (0 == client_info.find("Home Assistant "));'
+        then:
+          - delay: 5s
+          - script.execute: cal_render_grid
+          - script.execute: cal_fetch_dots
+
+script:
+  # Register with the shared close script so tap-outside / timeout hides us.
+  - id: !extend popup_close
+    then:
+      - lvgl.widget.hide: popup_calendar
+
+  # Compute the grid window and paint the 35 day cells: day number, dimmed
+  # out-of-month color, accent background on today, month/year header.
+  - id: cal_render_grid
+    then:
+      - lambda: |-
+          auto now = id(system_time).now();
+          if (!now.is_valid()) return;
+          time_t now_ts = (time_t) now.timestamp;
+          struct tm today;
+          localtime_r(&now_ts, &today);
+          // Monday of the current week, local midnight. mktime() normalizes
+          // the adjusted fields (and resolves DST via tm_isdst = -1).
+          struct tm start_tm = today;
+          start_tm.tm_mday -= (start_tm.tm_wday + 6) % 7;  // tm_wday: 0=Sun
+          start_tm.tm_hour = 0; start_tm.tm_min = 0; start_tm.tm_sec = 0;
+          start_tm.tm_isdst = -1;
+          time_t start = mktime(&start_tm);
+          id(cal_grid_start) = (long) start;
+
+          lv_obj_t *cells[35] = {
+            id(cal_c0),  id(cal_c1),  id(cal_c2),  id(cal_c3),  id(cal_c4),  id(cal_c5),  id(cal_c6),
+            id(cal_c7),  id(cal_c8),  id(cal_c9),  id(cal_c10), id(cal_c11), id(cal_c12), id(cal_c13),
+            id(cal_c14), id(cal_c15), id(cal_c16), id(cal_c17), id(cal_c18), id(cal_c19), id(cal_c20),
+            id(cal_c21), id(cal_c22), id(cal_c23), id(cal_c24), id(cal_c25), id(cal_c26), id(cal_c27),
+            id(cal_c28), id(cal_c29), id(cal_c30), id(cal_c31), id(cal_c32), id(cal_c33), id(cal_c34) };
+          lv_obj_t *labels[35] = {
+            id(cal_l0),  id(cal_l1),  id(cal_l2),  id(cal_l3),  id(cal_l4),  id(cal_l5),  id(cal_l6),
+            id(cal_l7),  id(cal_l8),  id(cal_l9),  id(cal_l10), id(cal_l11), id(cal_l12), id(cal_l13),
+            id(cal_l14), id(cal_l15), id(cal_l16), id(cal_l17), id(cal_l18), id(cal_l19), id(cal_l20),
+            id(cal_l21), id(cal_l22), id(cal_l23), id(cal_l24), id(cal_l25), id(cal_l26), id(cal_l27),
+            id(cal_l28), id(cal_l29), id(cal_l30), id(cal_l31), id(cal_l32), id(cal_l33), id(cal_l34) };
+
+          char buf[16];
+          for (int i = 0; i < 35; i++) {
+            struct tm d = start_tm;
+            d.tm_mday += i;
+            d.tm_isdst = -1;
+            mktime(&d);
+            snprintf(buf, sizeof(buf), "%d", d.tm_mday);
+            lv_label_set_text(labels[i], buf);
+            bool in_month = (d.tm_mon == today.tm_mon && d.tm_year == today.tm_year);
+            bool is_today = in_month && (d.tm_mday == today.tm_mday);
+            lv_obj_set_style_text_color(labels[i],
+                lv_color_hex(in_month ? 0xF2F0EB : 0x64748B), LV_PART_MAIN);
+            lv_obj_set_style_bg_color(cells[i],
+                lv_color_hex(is_today ? 0x2563EB : 0x334155), LV_PART_MAIN);
+          }
+
+          char hdr[32];
+          strftime(hdr, sizeof(hdr), "%B %Y", &today);
+          lv_label_set_text(id(cal_month_label), hdr);
+
+  # Fetch all events in the 35-day window and show a dot on each day that has
+  # at least one. Multi-day events mark only their start day.
+  - id: cal_fetch_dots
+    then:
+      - if:
+          condition:
+            # Grid not rendered yet (time not synced) — window unknown.
+            lambda: 'return id(cal_grid_start) != 0;'
+          then:
+            - homeassistant.action:
+                action: calendar.get_events
+                data:
+                  entity_id: ${calendar_entity}
+                data_template:
+                  start_date_time: "{{ ds }}"
+                  end_date_time: "{{ de }}"
+                variables:
+                  ds: !lambda |-
+                    time_t s = (time_t) id(cal_grid_start);
+                    struct tm t;
+                    localtime_r(&s, &t);
+                    char buf[24];
+                    strftime(buf, sizeof(buf), "%Y-%m-%d %H:%M:%S", &t);
+                    return std::string(buf);
+                  de: !lambda |-
+                    time_t s = (time_t) id(cal_grid_start);
+                    struct tm t;
+                    localtime_r(&s, &t);
+                    t.tm_mday += 35;
+                    t.tm_isdst = -1;
+                    mktime(&t);
+                    char buf[24];
+                    strftime(buf, sizeof(buf), "%Y-%m-%d %H:%M:%S", &t);
+                    return std::string(buf);
+                  ws: !lambda 'return std::to_string((long) id(cal_grid_start));'
+                capture_response: true
+                # Rendered by HA in the LIMITED template environment — only
+                # `response`, the variables above, and pure filters are
+                # available (no now()/states(), see forecast.yaml note).
+                # Emits a JSON array of grid day indices (0-34) that have at
+                # least one event. All-day events come as bare dates; anchor
+                # them at 12:00 local-ish so the floor-division lands on the
+                # right cell regardless of DST offset (±2h slack).
+                response_template: >-
+                  {% set evs = response['${calendar_entity}'].events | default([], true) %}
+                  {% set ns = namespace(days=[]) %}
+                  {% for e in evs %}
+                  {% set st = e.start if 'T' in e.start else e.start ~ 'T12:00:00+02:00' %}
+                  {% set d = (((st | as_timestamp(0)) - (ws | int)) // 86400) | int %}
+                  {% if d >= 0 and d < 35 and d not in ns.days %}
+                  {% set ns.days = ns.days + [d] %}
+                  {% endif %}
+                  {% endfor %}
+                  {{ ns.days | tojson }}
+                on_success:
+                  - lambda: |-
+                      lv_obj_t *dots[35] = {
+                        id(cal_dot_0),  id(cal_dot_1),  id(cal_dot_2),  id(cal_dot_3),  id(cal_dot_4),  id(cal_dot_5),  id(cal_dot_6),
+                        id(cal_dot_7),  id(cal_dot_8),  id(cal_dot_9),  id(cal_dot_10), id(cal_dot_11), id(cal_dot_12), id(cal_dot_13),
+                        id(cal_dot_14), id(cal_dot_15), id(cal_dot_16), id(cal_dot_17), id(cal_dot_18), id(cal_dot_19), id(cal_dot_20),
+                        id(cal_dot_21), id(cal_dot_22), id(cal_dot_23), id(cal_dot_24), id(cal_dot_25), id(cal_dot_26), id(cal_dot_27),
+                        id(cal_dot_28), id(cal_dot_29), id(cal_dot_30), id(cal_dot_31), id(cal_dot_32), id(cal_dot_33), id(cal_dot_34) };
+                      for (int i = 0; i < 35; i++)
+                        lv_obj_add_flag(dots[i], LV_OBJ_FLAG_HIDDEN);
+                      auto arr = response["response"];
+                      int n = arr.size();
+                      for (int i = 0; i < n; i++) {
+                        int d = arr[i].as<int>();
+                        if (d >= 0 && d < 35)
+                          lv_obj_clear_flag(dots[d], LV_OBJ_FLAG_HIDDEN);
+                      }
+                  - logger.log:
+                      level: DEBUG
+                      format: "Calendar dots refreshed (%d days with events)"
+                      args: ['(int) response["response"].size()']
+                on_error:
+                  - logger.log:
+                      level: ERROR
+                      format: "calendar.get_events failed for ${calendar_entity} (dots)"
+
+  # Open the popup for the day at cal_selected_idx and list its events.
+  # The popup opens immediately with "Loading..." — the fetch fills it in.
+  - id: cal_open_day
+    then:
+      - lvgl.label.update:
+          id: cal_popup_title
+          text: !lambda |-
+            time_t s = (time_t) id(cal_grid_start);
+            struct tm t;
+            localtime_r(&s, &t);
+            t.tm_mday += id(cal_selected_idx);
+            t.tm_hour = 0; t.tm_min = 0; t.tm_sec = 0;
+            t.tm_isdst = -1;
+            mktime(&t);
+            char buf[32];
+            strftime(buf, sizeof(buf), "%a, %d %B", &t);
+            return std::string(buf);
+      - lambda: |-
+          // Reset rows: show only row 0 as a loading indicator.
+          lv_obj_t *rows[8] = {
+            id(cal_row_0), id(cal_row_1), id(cal_row_2), id(cal_row_3),
+            id(cal_row_4), id(cal_row_5), id(cal_row_6), id(cal_row_7) };
+          lv_obj_t *lbls[8] = {
+            id(cal_ev_0), id(cal_ev_1), id(cal_ev_2), id(cal_ev_3),
+            id(cal_ev_4), id(cal_ev_5), id(cal_ev_6), id(cal_ev_7) };
+          for (int i = 0; i < 8; i++) {
+            lv_label_set_text(lbls[i], "");
+            lv_obj_add_flag(rows[i], LV_OBJ_FLAG_HIDDEN);
+          }
+          lv_label_set_text(lbls[0], "Loading...");
+          lv_obj_clear_flag(rows[0], LV_OBJ_FLAG_HIDDEN);
+      - lvgl.widget.show: popup_scrim
+      - lvgl.widget.show: popup_calendar
+      - script.execute: popup_start_timeout
+      - homeassistant.action:
+          action: calendar.get_events
+          data:
+            entity_id: ${calendar_entity}
+          data_template:
+            start_date_time: "{{ ds }}"
+            end_date_time: "{{ de }}"
+          variables:
+            ds: !lambda |-
+              time_t s = (time_t) id(cal_grid_start);
+              struct tm t;
+              localtime_r(&s, &t);
+              t.tm_mday += id(cal_selected_idx);
+              t.tm_hour = 0; t.tm_min = 0; t.tm_sec = 0;
+              t.tm_isdst = -1;
+              mktime(&t);
+              char buf[24];
+              strftime(buf, sizeof(buf), "%Y-%m-%d %H:%M:%S", &t);
+              return std::string(buf);
+            de: !lambda |-
+              time_t s = (time_t) id(cal_grid_start);
+              struct tm t;
+              localtime_r(&s, &t);
+              t.tm_mday += id(cal_selected_idx) + 1;
+              t.tm_hour = 0; t.tm_min = 0; t.tm_sec = 0;
+              t.tm_isdst = -1;
+              mktime(&t);
+              char buf[24];
+              strftime(buf, sizeof(buf), "%Y-%m-%d %H:%M:%S", &t);
+              return std::string(buf);
+          capture_response: true
+          # LIMITED env (see note above). Emits a JSON array of up to 8
+          # "HH:MM  Summary" strings, sorted by start; all-day events show
+          # "all-day" instead of a time.
+          response_template: >-
+            {% set evs = response['${calendar_entity}'].events | default([], true) | sort(attribute='start') %}
+            {% set ns = namespace(items=[]) %}
+            {% for e in evs[:8] %}
+            {% set tstr = (e.start | as_timestamp(0) | timestamp_custom('%H:%M')) if 'T' in e.start else 'all-day' %}
+            {% set ns.items = ns.items + [tstr ~ '  ' ~ e.summary | default('(no title)', true)] %}
+            {% endfor %}
+            {{ ns.items | tojson }}
+          on_success:
+            - lambda: |-
+                lv_obj_t *rows[8] = {
+                  id(cal_row_0), id(cal_row_1), id(cal_row_2), id(cal_row_3),
+                  id(cal_row_4), id(cal_row_5), id(cal_row_6), id(cal_row_7) };
+                lv_obj_t *lbls[8] = {
+                  id(cal_ev_0), id(cal_ev_1), id(cal_ev_2), id(cal_ev_3),
+                  id(cal_ev_4), id(cal_ev_5), id(cal_ev_6), id(cal_ev_7) };
+                auto arr = response["response"];
+                int n = arr.size();
+                for (int i = 0; i < 8; i++) {
+                  if (i < n) {
+                    lv_label_set_text(lbls[i], arr[i].as<std::string>().c_str());
+                    lv_obj_clear_flag(rows[i], LV_OBJ_FLAG_HIDDEN);
+                  } else {
+                    lv_label_set_text(lbls[i], "");
+                    lv_obj_add_flag(rows[i], LV_OBJ_FLAG_HIDDEN);
+                  }
+                }
+                if (n == 0) {
+                  lv_label_set_text(lbls[0], "No events");
+                  lv_obj_clear_flag(rows[0], LV_OBJ_FLAG_HIDDEN);
+                }
+          on_error:
+            - lvgl.label.update:
+                id: cal_ev_0
+                text: "Couldn't load events"
+            - lvgl.widget.show: cal_row_0
+            - logger.log:
+                level: ERROR
+                format: "calendar.get_events failed for ${calendar_entity} (day popup)"
+
+lvgl:
+  style_definitions:
+    # Day cell — matches the apple_tv button palette.
+    - id: cal_cell_style
+      bg_color: 0x334155
+      bg_opa: COVER
+      radius: 8
+      border_width: 0
+
+    - id: cal_accent_style
+      bg_color: 0x2563EB
+      bg_opa: COVER
+      radius: 16
+      border_width: 0
+
+    # Transparent flex/grid wrapper — no chrome, no scrollbars.
+    - id: cal_group_style
+      bg_opa: TRANSP
+      border_width: 0
+      pad_all: 0
+
+    # Event row card inside the popup.
+    - id: cal_row_style
+      bg_color: 0x1E293B
+      bg_opa: COVER
+      radius: 10
+      border_width: 0
+      pad_all: 10
+
+  top_layer:
+    widgets:
+      # Day-events modal. Sibling to popup_scrim (declared first in
+      # popup_system.yaml so the scrim renders beneath this).
+      - obj:
+          id: popup_calendar
+          hidden: true
+          align: CENTER
+          width: 92%
+          height: 88%
+          radius: 16
+          bg_color: 0x0F172A
+          bg_opa: COVER
+          border_width: 2
+          border_color: 0x334155
+          pad_all: 12
+          # Consume taps inside the popup so they don't fall through to the scrim.
+          clickable: true
+          widgets:
+            - label:
+                id: cal_popup_title
+                align: top_left
+                text: ""
+                text_font: montserrat_22
+                text_color: 0xF2F0EB
+
+            # Close "X" button — top right (same pattern as queue_popup.yaml)
+            - button:
+                align: top_right
+                width: 44
+                height: 44
+                bg_color: 0x334155
+                bg_opa: COVER
+                radius: 12
+                widgets:
+                  - label:
+                      align: center
+                      text: "X"
+                      text_font: montserrat_22
+                      text_color: 0xF2F0EB
+                on_click:
+                  - script.execute: popup_close
+
+            # Scrollable column of event rows, below the header.
+            - obj:
+                align: bottom_mid
+                width: 100%
+                height: 86%
+                styles: [cal_group_style]
+                pad_right: 6          # room for the scrollbar
+                scrollable: true
+                scrollbar_mode: AUTO
+                layout:
+                  type: FLEX
+                  flex_flow: COLUMN
+                  pad_row: 6
+                widgets:
+                  - obj:
+                      id: cal_row_0
+                      hidden: true
+                      styles: [cal_row_style]
+                      width: 100%
+                      height: SIZE_CONTENT
+                      scrollable: false
+                      widgets:
+                        - label:
+                            id: cal_ev_0
+                            width: 100%
+                            long_mode: wrap
+                            text: ""
+                            text_font: montserrat_18
+                            text_color: 0xF2F0EB
+                  - obj:
+                      id: cal_row_1
+                      hidden: true
+                      styles: [cal_row_style]
+                      width: 100%
+                      height: SIZE_CONTENT
+                      scrollable: false
+                      widgets:
+                        - label:
+                            id: cal_ev_1
+                            width: 100%
+                            long_mode: wrap
+                            text: ""
+                            text_font: montserrat_18
+                            text_color: 0xF2F0EB
+                  - obj:
+                      id: cal_row_2
+                      hidden: true
+                      styles: [cal_row_style]
+                      width: 100%
+                      height: SIZE_CONTENT
+                      scrollable: false
+                      widgets:
+                        - label:
+                            id: cal_ev_2
+                            width: 100%
+                            long_mode: wrap
+                            text: ""
+                            text_font: montserrat_18
+                            text_color: 0xF2F0EB
+                  - obj:
+                      id: cal_row_3
+                      hidden: true
+                      styles: [cal_row_style]
+                      width: 100%
+                      height: SIZE_CONTENT
+                      scrollable: false
+                      widgets:
+                        - label:
+                            id: cal_ev_3
+                            width: 100%
+                            long_mode: wrap
+                            text: ""
+                            text_font: montserrat_18
+                            text_color: 0xF2F0EB
+                  - obj:
+                      id: cal_row_4
+                      hidden: true
+                      styles: [cal_row_style]
+                      width: 100%
+                      height: SIZE_CONTENT
+                      scrollable: false
+                      widgets:
+                        - label:
+                            id: cal_ev_4
+                            width: 100%
+                            long_mode: wrap
+                            text: ""
+                            text_font: montserrat_18
+                            text_color: 0xF2F0EB
+                  - obj:
+                      id: cal_row_5
+                      hidden: true
+                      styles: [cal_row_style]
+                      width: 100%
+                      height: SIZE_CONTENT
+                      scrollable: false
+                      widgets:
+                        - label:
+                            id: cal_ev_5
+                            width: 100%
+                            long_mode: wrap
+                            text: ""
+                            text_font: montserrat_18
+                            text_color: 0xF2F0EB
+                  - obj:
+                      id: cal_row_6
+                      hidden: true
+                      styles: [cal_row_style]
+                      width: 100%
+                      height: SIZE_CONTENT
+                      scrollable: false
+                      widgets:
+                        - label:
+                            id: cal_ev_6
+                            width: 100%
+                            long_mode: wrap
+                            text: ""
+                            text_font: montserrat_18
+                            text_color: 0xF2F0EB
+                  - obj:
+                      id: cal_row_7
+                      hidden: true
+                      styles: [cal_row_style]
+                      width: 100%
+                      height: SIZE_CONTENT
+                      scrollable: false
+                      widgets:
+                        - label:
+                            id: cal_ev_7
+                            width: 100%
+                            long_mode: wrap
+                            text: ""
+                            text_font: montserrat_18
+                            text_color: 0xF2F0EB
