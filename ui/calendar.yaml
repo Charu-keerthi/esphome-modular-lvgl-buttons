@@ -24,10 +24,10 @@
 # Grid semantics: row 1 is always the current week (Monday start), plus the
 # next 4 weeks — today is always visible and no day is ever cut off. Days
 # outside the current month are dimmed; today gets the accent background.
-# Days with at least one event show a small black dot (cal_fetch_dots).
-# Per-event dot colors are NOT possible: HA's CalDAV integration drops the
-# ical COLOR property — calendar.get_events returns only start/end/summary/
-# description/location — so every dot uses the requested black fallback.
+# Every day an event covers (multi-day spans included) shows an amber dot
+# (cal_fetch_dots). Per-event dot colors are NOT possible: HA's CalDAV
+# integration drops the ical COLOR property — calendar.get_events returns
+# only start/end/summary/description/location — so all dots share one color.
 # Tapping a day opens popup_calendar with that day's events (cal_open_day).
 #
 # All calendar data flows through `homeassistant.action: calendar.get_events`
@@ -172,20 +172,18 @@ script:
                 # above are ONLY for data_template — referencing them here
                 # raises and fires on_error. Also LIMITED env: no now() /
                 # states() (see forecast.yaml note). So this template only
-                # slices: it emits a JSON array of unique "YYYY-MM-DD" day
-                # strings (HA returns event starts in HA-local time, both
-                # "2026-07-19T15:00:00+02:00" and all-day "2026-07-19", so
-                # the first 10 chars are always the local start date).
+                # slices: it emits [{s: "YYYY-MM-DD", e: <full end>}] per
+                # event; the device expands multi-day spans itself. HA
+                # returns starts/ends in HA-local time, both timed
+                # ("2026-07-19T15:00:00+02:00") and all-day ("2026-07-19"),
+                # so the first 10 chars are always the local date.
                 response_template: >-
                   {% set evs = response['${calendar_entity}'].events | default([], true) %}
-                  {% set ns = namespace(days=[]) %}
+                  {% set ns = namespace(items=[]) %}
                   {% for e in evs %}
-                  {% set d = e.start[:10] %}
-                  {% if d not in ns.days %}
-                  {% set ns.days = ns.days + [d] %}
-                  {% endif %}
+                  {% set ns.items = ns.items + [{'s': e.start[:10], 'e': e.end | default(e.start, true)}] %}
                   {% endfor %}
-                  {{ ns.days | tojson }}
+                  {{ ns.items | tojson }}
                 on_success:
                   - lambda: |-
                       lv_obj_t *dots[35] = {
@@ -194,28 +192,63 @@ script:
                         id(cal_dot_14), id(cal_dot_15), id(cal_dot_16), id(cal_dot_17), id(cal_dot_18), id(cal_dot_19), id(cal_dot_20),
                         id(cal_dot_21), id(cal_dot_22), id(cal_dot_23), id(cal_dot_24), id(cal_dot_25), id(cal_dot_26), id(cal_dot_27),
                         id(cal_dot_28), id(cal_dot_29), id(cal_dot_30), id(cal_dot_31), id(cal_dot_32), id(cal_dot_33), id(cal_dot_34) };
-                      auto arr = response["response"];
-                      int n = arr.size();
+                      // Date of each grid cell as a yyyymmdd key (keys compare
+                      // in date order).
+                      long cell_keys[35];
                       time_t s = (time_t) id(cal_grid_start);
                       struct tm start_tm;
                       localtime_r(&s, &start_tm);
-                      char buf[16];
-                      int shown = 0;
                       for (int i = 0; i < 35; i++) {
                         struct tm d = start_tm;
                         d.tm_mday += i;
                         d.tm_isdst = -1;
                         mktime(&d);
-                        strftime(buf, sizeof(buf), "%Y-%m-%d", &d);
-                        bool has_event = false;
-                        for (int j = 0; j < n; j++) {
-                          const char *ds = arr[j].as<const char *>();
-                          if (ds != nullptr && strcmp(ds, buf) == 0) {
-                            has_event = true;
-                            break;
-                          }
+                        cell_keys[i] = (d.tm_year + 1900) * 10000L + (d.tm_mon + 1) * 100 + d.tm_mday;
+                      }
+                      // Mark every cell inside each event's inclusive date
+                      // range. iCal end semantics: an all-day end date is
+                      // EXCLUSIVE, and a timed event ending at exactly
+                      // midnight does not occupy that day — subtract one day
+                      // in both cases (mktime handles month rollover).
+                      bool has_event[35] = {};
+                      auto arr = response["response"];
+                      int n = arr.size();
+                      for (int j = 0; j < n; j++) {
+                        const char *ss = arr[j]["s"].as<const char *>();
+                        const char *es = arr[j]["e"].as<const char *>();
+                        if (ss == nullptr || es == nullptr)
+                          continue;
+                        int sy, smo, sd, ey, emo, ed;
+                        if (sscanf(ss, "%d-%d-%d", &sy, &smo, &sd) != 3)
+                          continue;
+                        if (sscanf(es, "%d-%d-%d", &ey, &emo, &ed) != 3)
+                          continue;
+                        bool exclusive_end =
+                            (strchr(es, 'T') == nullptr) || (strstr(es, "T00:00:00") != nullptr);
+                        if (exclusive_end) {
+                          struct tm t = {};
+                          t.tm_year = ey - 1900;
+                          t.tm_mon = emo - 1;
+                          t.tm_mday = ed - 1;
+                          t.tm_hour = 12;
+                          t.tm_isdst = -1;
+                          mktime(&t);
+                          ey = t.tm_year + 1900;
+                          emo = t.tm_mon + 1;
+                          ed = t.tm_mday;
                         }
-                        if (has_event) {
+                        long s_key = sy * 10000L + smo * 100 + sd;
+                        long e_key = ey * 10000L + emo * 100 + ed;
+                        if (e_key < s_key)
+                          e_key = s_key;
+                        for (int i = 0; i < 35; i++) {
+                          if (cell_keys[i] >= s_key && cell_keys[i] <= e_key)
+                            has_event[i] = true;
+                        }
+                      }
+                      int shown = 0;
+                      for (int i = 0; i < 35; i++) {
+                        if (has_event[i]) {
                           lv_obj_clear_flag(dots[i], LV_OBJ_FLAG_HIDDEN);
                           shown++;
                         } else {

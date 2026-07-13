@@ -154,10 +154,10 @@ widgets:
               - obj:
                   id: cal_dot_0
                   hidden: true
-                  width: 8
-                  height: 8
-                  radius: 4
-                  bg_color: 0x000000
+                  width: 12
+                  height: 12
+                  radius: 6
+                  bg_color: 0xFBBF24
                   bg_opa: COVER
                   border_width: 0
                   align: bottom_mid
@@ -182,10 +182,10 @@ widgets:
               - obj:
                   id: cal_dot_1
                   hidden: true
-                  width: 8
-                  height: 8
-                  radius: 4
-                  bg_color: 0x000000
+                  width: 12
+                  height: 12
+                  radius: 6
+                  bg_color: 0xFBBF24
                   bg_opa: COVER
                   border_width: 0
                   align: bottom_mid
@@ -210,10 +210,10 @@ widgets:
               - obj:
                   id: cal_dot_2
                   hidden: true
-                  width: 8
-                  height: 8
-                  radius: 4
-                  bg_color: 0x000000
+                  width: 12
+                  height: 12
+                  radius: 6
+                  bg_color: 0xFBBF24
                   bg_opa: COVER
                   border_width: 0
                   align: bottom_mid
@@ -238,10 +238,10 @@ widgets:
               - obj:
                   id: cal_dot_3
                   hidden: true
-                  width: 8
-                  height: 8
-                  radius: 4
-                  bg_color: 0x000000
+                  width: 12
+                  height: 12
+                  radius: 6
+                  bg_color: 0xFBBF24
                   bg_opa: COVER
                   border_width: 0
                   align: bottom_mid
@@ -266,10 +266,10 @@ widgets:
               - obj:
                   id: cal_dot_4
                   hidden: true
-                  width: 8
-                  height: 8
-                  radius: 4
-                  bg_color: 0x000000
+                  width: 12
+                  height: 12
+                  radius: 6
+                  bg_color: 0xFBBF24
                   bg_opa: COVER
                   border_width: 0
                   align: bottom_mid
@@ -294,10 +294,10 @@ widgets:
               - obj:
                   id: cal_dot_5
                   hidden: true
-                  width: 8
-                  height: 8
-                  radius: 4
-                  bg_color: 0x000000
+                  width: 12
+                  height: 12
+                  radius: 6
+                  bg_color: 0xFBBF24
                   bg_opa: COVER
                   border_width: 0
                   align: bottom_mid
@@ -322,10 +322,10 @@ widgets:
               - obj:
                   id: cal_dot_6
                   hidden: true
-                  width: 8
-                  height: 8
-                  radius: 4
-                  bg_color: 0x000000
+                  width: 12
+                  height: 12
+                  radius: 6
+                  bg_color: 0xFBBF24
                   bg_opa: COVER
                   border_width: 0
                   align: bottom_mid
@@ -350,10 +350,10 @@ widgets:
               - obj:
                   id: cal_dot_7
                   hidden: true
-                  width: 8
-                  height: 8
-                  radius: 4
-                  bg_color: 0x000000
+                  width: 12
+                  height: 12
+                  radius: 6
+                  bg_color: 0xFBBF24
                   bg_opa: COVER
                   border_width: 0
                   align: bottom_mid
@@ -378,10 +378,10 @@ widgets:
               - obj:
                   id: cal_dot_8
                   hidden: true
-                  width: 8
-                  height: 8
-                  radius: 4
-                  bg_color: 0x000000
+                  width: 12
+                  height: 12
+                  radius: 6
+                  bg_color: 0xFBBF24
                   bg_opa: COVER
                   border_width: 0
                   align: bottom_mid
@@ -406,10 +406,10 @@ widgets:
               - obj:
                   id: cal_dot_9
                   hidden: true
-                  width: 8
-                  height: 8
-                  radius: 4
-                  bg_color: 0x000000
+                  width: 12
+                  height: 12
+                  radius: 6
+                  bg_color: 0xFBBF24
                   bg_opa: COVER
                   border_width: 0
                   align: bottom_mid
@@ -434,10 +434,10 @@ widgets:
               - obj:
                   id: cal_dot_10
                   hidden: true
-                  width: 8
-                  height: 8
-                  radius: 4
-                  bg_color: 0x000000
+                  width: 12
+                  height: 12
+                  radius: 6
+                  bg_color: 0xFBBF24
                   bg_opa: COVER
                   border_width: 0
                   align: bottom_mid
@@ -462,10 +462,10 @@ widgets:
               - obj:
                   id: cal_dot_11
                   hidden: true
-                  width: 8
-                  height: 8
-                  radius: 4
-                  bg_color: 0x000000
+                  width: 12
+                  height: 12
+                  radius: 6
+                  bg_color: 0xFBBF24
                   bg_opa: COVER
                   border_width: 0
                   align: bottom_mid
@@ -490,10 +490,10 @@ widgets:
               - obj:
                   id: cal_dot_12
                   hidden: true
-                  width: 8
-                  height: 8
-                  radius: 4
-                  bg_color: 0x000000
+                  width: 12
+                  height: 12
+                  radius: 6
+                  bg_color: 0xFBBF24
                   bg_opa: COVER
                   border_width: 0
                   align: bottom_mid
@@ -518,10 +518,10 @@ widgets:
               - obj:
                   id: cal_dot_13
                   hidden: true
-                  width: 8
-                  height: 8
-                  radius: 4
-                  bg_color: 0x000000
+                  width: 12
+                  height: 12
+                  radius: 6
+                  bg_color: 0xFBBF24
                   bg_opa: COVER
                   border_width: 0
                   align: bottom_mid
@@ -546,10 +546,10 @@ widgets:
               - obj:
                   id: cal_dot_14
                   hidden: true
-                  width: 8
-                  height: 8
-                  radius: 4
-                  bg_color: 0x000000
+                  width: 12
+                  height: 12
+                  radius: 6
+                  bg_color: 0xFBBF24
                   bg_opa: COVER
                   border_width: 0
                   align: bottom_mid
@@ -574,10 +574,10 @@ widgets:
               - obj:
                   id: cal_dot_15
                   hidden: true
-                  width: 8
-                  height: 8
-                  radius: 4
-                  bg_color: 0x000000
+                  width: 12
+                  height: 12
+                  radius: 6
+                  bg_color: 0xFBBF24
                   bg_opa: COVER
                   border_width: 0
                   align: bottom_mid
@@ -602,10 +602,10 @@ widgets:
               - obj:
                   id: cal_dot_16
                   hidden: true
-                  width: 8
-                  height: 8
-                  radius: 4
-                  bg_color: 0x000000
+                  width: 12
+                  height: 12
+                  radius: 6
+                  bg_color: 0xFBBF24
                   bg_opa: COVER
                   border_width: 0
                   align: bottom_mid
@@ -630,10 +630,10 @@ widgets:
               - obj:
                   id: cal_dot_17
                   hidden: true
-                  width: 8
-                  height: 8
-                  radius: 4
-                  bg_color: 0x000000
+                  width: 12
+                  height: 12
+                  radius: 6
+                  bg_color: 0xFBBF24
                   bg_opa: COVER
                   border_width: 0
                   align: bottom_mid
@@ -658,10 +658,10 @@ widgets:
               - obj:
                   id: cal_dot_18
                   hidden: true
-                  width: 8
-                  height: 8
-                  radius: 4
-                  bg_color: 0x000000
+                  width: 12
+                  height: 12
+                  radius: 6
+                  bg_color: 0xFBBF24
                   bg_opa: COVER
                   border_width: 0
                   align: bottom_mid
@@ -686,10 +686,10 @@ widgets:
               - obj:
                   id: cal_dot_19
                   hidden: true
-                  width: 8
-                  height: 8
-                  radius: 4
-                  bg_color: 0x000000
+                  width: 12
+                  height: 12
+                  radius: 6
+                  bg_color: 0xFBBF24
                   bg_opa: COVER
                   border_width: 0
                   align: bottom_mid
@@ -714,10 +714,10 @@ widgets:
               - obj:
                   id: cal_dot_20
                   hidden: true
-                  width: 8
-                  height: 8
-                  radius: 4
-                  bg_color: 0x000000
+                  width: 12
+                  height: 12
+                  radius: 6
+                  bg_color: 0xFBBF24
                   bg_opa: COVER
                   border_width: 0
                   align: bottom_mid
@@ -742,10 +742,10 @@ widgets:
               - obj:
                   id: cal_dot_21
                   hidden: true
-                  width: 8
-                  height: 8
-                  radius: 4
-                  bg_color: 0x000000
+                  width: 12
+                  height: 12
+                  radius: 6
+                  bg_color: 0xFBBF24
                   bg_opa: COVER
                   border_width: 0
                   align: bottom_mid
@@ -770,10 +770,10 @@ widgets:
               - obj:
                   id: cal_dot_22
                   hidden: true
-                  width: 8
-                  height: 8
-                  radius: 4
-                  bg_color: 0x000000
+                  width: 12
+                  height: 12
+                  radius: 6
+                  bg_color: 0xFBBF24
                   bg_opa: COVER
                   border_width: 0
                   align: bottom_mid
@@ -798,10 +798,10 @@ widgets:
               - obj:
                   id: cal_dot_23
                   hidden: true
-                  width: 8
-                  height: 8
-                  radius: 4
-                  bg_color: 0x000000
+                  width: 12
+                  height: 12
+                  radius: 6
+                  bg_color: 0xFBBF24
                   bg_opa: COVER
                   border_width: 0
                   align: bottom_mid
@@ -826,10 +826,10 @@ widgets:
               - obj:
                   id: cal_dot_24
                   hidden: true
-                  width: 8
-                  height: 8
-                  radius: 4
-                  bg_color: 0x000000
+                  width: 12
+                  height: 12
+                  radius: 6
+                  bg_color: 0xFBBF24
                   bg_opa: COVER
                   border_width: 0
                   align: bottom_mid
@@ -854,10 +854,10 @@ widgets:
               - obj:
                   id: cal_dot_25
                   hidden: true
-                  width: 8
-                  height: 8
-                  radius: 4
-                  bg_color: 0x000000
+                  width: 12
+                  height: 12
+                  radius: 6
+                  bg_color: 0xFBBF24
                   bg_opa: COVER
                   border_width: 0
                   align: bottom_mid
@@ -882,10 +882,10 @@ widgets:
               - obj:
                   id: cal_dot_26
                   hidden: true
-                  width: 8
-                  height: 8
-                  radius: 4
-                  bg_color: 0x000000
+                  width: 12
+                  height: 12
+                  radius: 6
+                  bg_color: 0xFBBF24
                   bg_opa: COVER
                   border_width: 0
                   align: bottom_mid
@@ -910,10 +910,10 @@ widgets:
               - obj:
                   id: cal_dot_27
                   hidden: true
-                  width: 8
-                  height: 8
-                  radius: 4
-                  bg_color: 0x000000
+                  width: 12
+                  height: 12
+                  radius: 6
+                  bg_color: 0xFBBF24
                   bg_opa: COVER
                   border_width: 0
                   align: bottom_mid
@@ -938,10 +938,10 @@ widgets:
               - obj:
                   id: cal_dot_28
                   hidden: true
-                  width: 8
-                  height: 8
-                  radius: 4
-                  bg_color: 0x000000
+                  width: 12
+                  height: 12
+                  radius: 6
+                  bg_color: 0xFBBF24
                   bg_opa: COVER
                   border_width: 0
                   align: bottom_mid
@@ -966,10 +966,10 @@ widgets:
               - obj:
                   id: cal_dot_29
                   hidden: true
-                  width: 8
-                  height: 8
-                  radius: 4
-                  bg_color: 0x000000
+                  width: 12
+                  height: 12
+                  radius: 6
+                  bg_color: 0xFBBF24
                   bg_opa: COVER
                   border_width: 0
                   align: bottom_mid
@@ -994,10 +994,10 @@ widgets:
               - obj:
                   id: cal_dot_30
                   hidden: true
-                  width: 8
-                  height: 8
-                  radius: 4
-                  bg_color: 0x000000
+                  width: 12
+                  height: 12
+                  radius: 6
+                  bg_color: 0xFBBF24
                   bg_opa: COVER
                   border_width: 0
                   align: bottom_mid
@@ -1022,10 +1022,10 @@ widgets:
               - obj:
                   id: cal_dot_31
                   hidden: true
-                  width: 8
-                  height: 8
-                  radius: 4
-                  bg_color: 0x000000
+                  width: 12
+                  height: 12
+                  radius: 6
+                  bg_color: 0xFBBF24
                   bg_opa: COVER
                   border_width: 0
                   align: bottom_mid
@@ -1050,10 +1050,10 @@ widgets:
               - obj:
                   id: cal_dot_32
                   hidden: true
-                  width: 8
-                  height: 8
-                  radius: 4
-                  bg_color: 0x000000
+                  width: 12
+                  height: 12
+                  radius: 6
+                  bg_color: 0xFBBF24
                   bg_opa: COVER
                   border_width: 0
                   align: bottom_mid
@@ -1078,10 +1078,10 @@ widgets:
               - obj:
                   id: cal_dot_33
                   hidden: true
-                  width: 8
-                  height: 8
-                  radius: 4
-                  bg_color: 0x000000
+                  width: 12
+                  height: 12
+                  radius: 6
+                  bg_color: 0xFBBF24
                   bg_opa: COVER
                   border_width: 0
                   align: bottom_mid
@@ -1106,10 +1106,10 @@ widgets:
               - obj:
                   id: cal_dot_34
                   hidden: true
-                  width: 8
-                  height: 8
-                  radius: 4
-                  bg_color: 0x000000
+                  width: 12
+                  height: 12
+                  radius: 6
+                  bg_color: 0xFBBF24
                   bg_opa: COVER
                   border_width: 0
                   align: bottom_mid
