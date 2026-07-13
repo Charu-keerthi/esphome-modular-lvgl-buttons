@@ -24,8 +24,11 @@
 # Grid semantics: row 1 is always the current week (Monday start), plus the
 # next 4 weeks — today is always visible and no day is ever cut off. Days
 # outside the current month are dimmed; today gets the accent background.
-# Days with at least one event show a small dot (cal_fetch_dots). Tapping a
-# day opens popup_calendar with that day's events (cal_open_day).
+# Days with at least one event show a small black dot (cal_fetch_dots).
+# Per-event dot colors are NOT possible: HA's CalDAV integration drops the
+# ical COLOR property — calendar.get_events returns only start/end/summary/
+# description/location — so every dot uses the requested black fallback.
+# Tapping a day opens popup_calendar with that day's events (cal_open_day).
 #
 # All calendar data flows through `homeassistant.action: calendar.get_events`
 # with capture_response — same mechanism as ui/weather/forecast.yaml.
@@ -163,22 +166,22 @@ script:
                     char buf[24];
                     strftime(buf, sizeof(buf), "%Y-%m-%d %H:%M:%S", &t);
                     return std::string(buf);
-                  ws: !lambda 'return std::to_string((long) id(cal_grid_start));'
                 capture_response: true
-                # Rendered by HA in the LIMITED template environment — only
-                # `response`, the variables above, and pure filters are
-                # available (no now()/states(), see forecast.yaml note).
-                # Emits a JSON array of grid day indices (0-34) that have at
-                # least one event. All-day events come as bare dates; anchor
-                # them at 12:00 local-ish so the floor-division lands on the
-                # right cell regardless of DST offset (±2h slack).
+                # Rendered by HA with variables={"response": ...} and
+                # strict=True (see HA esphome/manager.py): the `variables:`
+                # above are ONLY for data_template — referencing them here
+                # raises and fires on_error. Also LIMITED env: no now() /
+                # states() (see forecast.yaml note). So this template only
+                # slices: it emits a JSON array of unique "YYYY-MM-DD" day
+                # strings (HA returns event starts in HA-local time, both
+                # "2026-07-19T15:00:00+02:00" and all-day "2026-07-19", so
+                # the first 10 chars are always the local start date).
                 response_template: >-
                   {% set evs = response['${calendar_entity}'].events | default([], true) %}
                   {% set ns = namespace(days=[]) %}
                   {% for e in evs %}
-                  {% set st = e.start if 'T' in e.start else e.start ~ 'T12:00:00+02:00' %}
-                  {% set d = (((st | as_timestamp(0)) - (ws | int)) // 86400) | int %}
-                  {% if d >= 0 and d < 35 and d not in ns.days %}
+                  {% set d = e.start[:10] %}
+                  {% if d not in ns.days %}
                   {% set ns.days = ns.days + [d] %}
                   {% endif %}
                   {% endfor %}
@@ -191,23 +194,40 @@ script:
                         id(cal_dot_14), id(cal_dot_15), id(cal_dot_16), id(cal_dot_17), id(cal_dot_18), id(cal_dot_19), id(cal_dot_20),
                         id(cal_dot_21), id(cal_dot_22), id(cal_dot_23), id(cal_dot_24), id(cal_dot_25), id(cal_dot_26), id(cal_dot_27),
                         id(cal_dot_28), id(cal_dot_29), id(cal_dot_30), id(cal_dot_31), id(cal_dot_32), id(cal_dot_33), id(cal_dot_34) };
-                      for (int i = 0; i < 35; i++)
-                        lv_obj_add_flag(dots[i], LV_OBJ_FLAG_HIDDEN);
                       auto arr = response["response"];
                       int n = arr.size();
-                      for (int i = 0; i < n; i++) {
-                        int d = arr[i].as<int>();
-                        if (d >= 0 && d < 35)
-                          lv_obj_clear_flag(dots[d], LV_OBJ_FLAG_HIDDEN);
+                      time_t s = (time_t) id(cal_grid_start);
+                      struct tm start_tm;
+                      localtime_r(&s, &start_tm);
+                      char buf[16];
+                      int shown = 0;
+                      for (int i = 0; i < 35; i++) {
+                        struct tm d = start_tm;
+                        d.tm_mday += i;
+                        d.tm_isdst = -1;
+                        mktime(&d);
+                        strftime(buf, sizeof(buf), "%Y-%m-%d", &d);
+                        bool has_event = false;
+                        for (int j = 0; j < n; j++) {
+                          const char *ds = arr[j].as<const char *>();
+                          if (ds != nullptr && strcmp(ds, buf) == 0) {
+                            has_event = true;
+                            break;
+                          }
+                        }
+                        if (has_event) {
+                          lv_obj_clear_flag(dots[i], LV_OBJ_FLAG_HIDDEN);
+                          shown++;
+                        } else {
+                          lv_obj_add_flag(dots[i], LV_OBJ_FLAG_HIDDEN);
+                        }
                       }
-                  - logger.log:
-                      level: DEBUG
-                      format: "Calendar dots refreshed (%d days with events)"
-                      args: ['(int) response["response"].size()']
+                      ESP_LOGD("calendar", "Dots refreshed (%d days with events)", shown);
                 on_error:
                   - logger.log:
                       level: ERROR
-                      format: "calendar.get_events failed for ${calendar_entity} (dots)"
+                      format: "calendar.get_events failed for ${calendar_entity} (dots): %s"
+                      args: ['error.c_str()']
 
   # Open the popup for the day at cal_selected_idx and list its events.
   # The popup opens immediately with "Loading..." — the fetch fills it in.
@@ -274,7 +294,8 @@ script:
               strftime(buf, sizeof(buf), "%Y-%m-%d %H:%M:%S", &t);
               return std::string(buf);
           capture_response: true
-          # LIMITED env (see note above). Emits a JSON array of up to 8
+          # LIMITED env + strict=True, only `response` is available (see the
+          # note on cal_fetch_dots). Emits a JSON array of up to 8
           # "HH:MM  Summary" strings, sorted by start; all-day events show
           # "all-day" instead of a time.
           response_template: >-
@@ -315,7 +336,8 @@ script:
             - lvgl.widget.show: cal_row_0
             - logger.log:
                 level: ERROR
-                format: "calendar.get_events failed for ${calendar_entity} (day popup)"
+                format: "calendar.get_events failed for ${calendar_entity} (day popup): %s"
+                args: ['error.c_str()']
 
 lvgl:
   style_definitions:
