@@ -328,15 +328,16 @@ script:
               return std::string(buf);
           capture_response: true
           # LIMITED env + strict=True, only `response` is available (see the
-          # note on cal_fetch_dots). Emits a JSON array of up to 8
-          # "HH:MM  Summary" strings, sorted by start; all-day events show
-          # "all-day" instead of a time.
+          # note on cal_fetch_dots). Emits a JSON array of up to 12
+          # {n: summary, s: start, e: end} objects, sorted by start; all
+          # time-range formatting and day filtering happens on-device in
+          # on_success (12 > 8 rows because spillover events from adjacent
+          # days get dropped there).
           response_template: >-
             {% set evs = response['${calendar_entity}'].events | default([], true) | sort(attribute='start') %}
             {% set ns = namespace(items=[]) %}
-            {% for e in evs[:8] %}
-            {% set tstr = (e.start | as_timestamp(0) | timestamp_custom('%H:%M')) if 'T' in e.start else 'all-day' %}
-            {% set ns.items = ns.items + [tstr ~ '  ' ~ e.summary | default('(no title)', true)] %}
+            {% for e in evs[:12] %}
+            {% set ns.items = ns.items + [{'n': e.summary | default('(no title)', true), 's': e.start, 'e': e.end | default(e.start, true)}] %}
             {% endfor %}
             {{ ns.items | tojson }}
           on_success:
@@ -347,18 +348,97 @@ script:
                 lv_obj_t *lbls[8] = {
                   id(cal_ev_0), id(cal_ev_1), id(cal_ev_2), id(cal_ev_3),
                   id(cal_ev_4), id(cal_ev_5), id(cal_ev_6), id(cal_ev_7) };
+                // "14. August" from y/m/d (mktime normalizes, %B names the month).
+                auto day_month = [](int y, int m, int d, char *out, size_t len) {
+                  struct tm t = {};
+                  t.tm_year = y - 1900; t.tm_mon = m - 1; t.tm_mday = d;
+                  t.tm_hour = 12; t.tm_isdst = -1;
+                  mktime(&t);
+                  char mon[16];
+                  strftime(mon, sizeof(mon), "%B", &t);
+                  snprintf(out, len, "%d. %s", t.tm_mday, mon);
+                };
+                // Date key of the tapped day (yyyymmdd, compares in date
+                // order — same scheme as cal_fetch_dots).
+                time_t s0 = (time_t) id(cal_grid_start);
+                struct tm dsel;
+                localtime_r(&s0, &dsel);
+                dsel.tm_mday += id(cal_selected_idx);
+                dsel.tm_hour = 12; dsel.tm_isdst = -1;
+                mktime(&dsel);
+                long day_key = (dsel.tm_year + 1900) * 10000L
+                             + (dsel.tm_mon + 1) * 100 + dsel.tm_mday;
                 auto arr = response["response"];
                 int n = arr.size();
-                for (int i = 0; i < 8; i++) {
-                  if (i < n) {
-                    lv_label_set_text(lbls[i], arr[i].as<std::string>().c_str());
-                    lv_obj_clear_flag(rows[i], LV_OBJ_FLAG_HIDDEN);
-                  } else {
-                    lv_label_set_text(lbls[i], "");
-                    lv_obj_add_flag(rows[i], LV_OBJ_FLAG_HIDDEN);
+                int shown = 0;
+                for (int j = 0; j < n && shown < 8; j++) {
+                  const char *name = arr[j]["n"].as<const char*>();
+                  const char *ss = arr[j]["s"].as<const char*>();
+                  const char *es = arr[j]["e"].as<const char*>();
+                  if (name == nullptr) name = "(no title)";
+                  if (ss == nullptr) ss = "";
+                  if (es == nullptr) es = ss;
+                  // Timed starts/ends carry HA-local wall-clock time
+                  // ("2026-07-19T15:00:00+02:00") — read hour/min directly.
+                  int sy=0, smo=0, sd=0, sh=0, smi=0;
+                  int ey=0, emo=0, ed=0, eh=0, emi=0;
+                  bool timed = strchr(ss, 'T') != nullptr;
+                  sscanf(ss, "%d-%d-%dT%d:%d", &sy, &smo, &sd, &sh, &smi);
+                  sscanf(es, "%d-%d-%dT%d:%d", &ey, &emo, &ed, &eh, &emi);
+                  // Last day the event actually covers, for the day filter:
+                  // iCal all-day end dates are exclusive, and a timed event
+                  // ending at exactly midnight doesn't occupy that day
+                  // (same rules as cal_fetch_dots).
+                  int ky = ey, kmo = emo, kd = ed;
+                  bool exclusive_end =
+                      (strchr(es, 'T') == nullptr) || (strstr(es, "T00:00:00") != nullptr);
+                  if (exclusive_end) {
+                    struct tm t = {};
+                    t.tm_year = ey - 1900; t.tm_mon = emo - 1; t.tm_mday = ed - 1;
+                    t.tm_hour = 12; t.tm_isdst = -1;
+                    mktime(&t);
+                    ky = t.tm_year + 1900; kmo = t.tm_mon + 1; kd = t.tm_mday;
                   }
+                  long s_key = sy * 10000L + smo * 100 + sd;
+                  long e_key = ky * 10000L + kmo * 100 + kd;
+                  if (e_key < s_key) { ky = sy; kmo = smo; kd = sd; e_key = s_key; }
+                  // HA's CalDAV integration also returns events whose
+                  // exclusive end lands exactly on the query start (e.g. the
+                  // previous day's all-day event) — drop anything that
+                  // doesn't cover the tapped day.
+                  if (day_key < s_key || day_key > e_key)
+                    continue;
+                  // All-day events display through their last covered day;
+                  // timed events keep their real end time/date.
+                  if (!timed) { ey = ky; emo = kmo; ed = kd; }
+                  bool same_day = (sy == ey && smo == emo && sd == ed);
+                  char line[80];
+                  if (timed && same_day) {
+                    snprintf(line, sizeof(line), "%02d:%02d - %02d:%02d", sh, smi, eh, emi);
+                  } else if (timed) {
+                    char sdate[24], edate[24];
+                    day_month(sy, smo, sd, sdate, sizeof(sdate));
+                    day_month(ey, emo, ed, edate, sizeof(edate));
+                    snprintf(line, sizeof(line), "%02d:%02d %s - %02d:%02d %s",
+                             sh, smi, sdate, eh, emi, edate);
+                  } else if (same_day) {
+                    snprintf(line, sizeof(line), "all-day");
+                  } else {
+                    char sdate[24], edate[24];
+                    day_month(sy, smo, sd, sdate, sizeof(sdate));
+                    day_month(ey, emo, ed, edate, sizeof(edate));
+                    snprintf(line, sizeof(line), "%s - %s", sdate, edate);
+                  }
+                  std::string txt = std::string(name) + "\n" + line;
+                  lv_label_set_text(lbls[shown], txt.c_str());
+                  lv_obj_clear_flag(rows[shown], LV_OBJ_FLAG_HIDDEN);
+                  shown++;
                 }
-                if (n == 0) {
+                for (int i = shown; i < 8; i++) {
+                  lv_label_set_text(lbls[i], "");
+                  lv_obj_add_flag(rows[i], LV_OBJ_FLAG_HIDDEN);
+                }
+                if (shown == 0) {
                   lv_label_set_text(lbls[0], "No events");
                   lv_obj_clear_flag(rows[0], LV_OBJ_FLAG_HIDDEN);
                 }
