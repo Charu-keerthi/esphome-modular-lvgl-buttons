@@ -1,5 +1,5 @@
-# Calendar logic — rolling 5-week grid synced to a Home Assistant calendar
-# (e.g. a CalDAV/Radicale calendar), plus the per-day events popup.
+# Calendar logic — month view (5-week grid) synced to a Home Assistant
+# calendar (e.g. a CalDAV/Radicale calendar), plus the per-day events popup.
 #
 # This file is HALF of the calendar feature; the page widget tree lives in
 # ui/calendar_page.yaml. ESPHome merges package lists as <packages> + <main
@@ -21,9 +21,13 @@
 # Requires $mdi_home in the device's mdi_icons_40 font (already used by other
 # pages). The popup close button is a plain "X" label like queue_popup.yaml.
 #
-# Grid semantics: row 1 is always the current week (Monday start), plus the
-# next 4 weeks — today is always visible and no day is ever cut off. Days
-# outside the current month are dimmed; today gets the accent background.
+# Grid semantics: anchored month view. The grid starts at the Monday of the
+# week containing the 1st of the viewed month (cal_month_offset relative to
+# the current month; </> buttons in the page's top bar step it, tapping the
+# header jumps back to the current month). All 35 cells are always occupied;
+# a month spanning 6 weeks has its last day(s) clipped — they appear at the
+# top of the NEXT month's view instead. Days outside the viewed month are
+# dimmed; today gets the accent background when visible.
 # Every day an event covers (multi-day spans included) shows an amber dot
 # (cal_fetch_dots). Per-event dot colors are NOT possible: HA's CalDAV
 # integration drops the ical COLOR property — calendar.get_events returns
@@ -43,6 +47,12 @@ globals:
   # Grid index (0-34) of the day the user tapped. Set by the cell's on_click,
   # read by cal_open_day (same global-not-param pattern as queue_popup.yaml).
   - id: cal_selected_idx
+    type: int
+    restore_value: no
+    initial_value: '0'
+  # Viewed month relative to the current month (0 = this month, -1 =
+  # previous, ...). Stepped by the page's </> buttons, reset on page load.
+  - id: cal_month_offset
     type: int
     restore_value: no
     initial_value: '0'
@@ -90,11 +100,18 @@ script:
           time_t now_ts = (time_t) now.timestamp;
           struct tm today;
           localtime_r(&now_ts, &today);
-          // Monday of the current week, local midnight. mktime() normalizes
-          // the adjusted fields (and resolves DST via tm_isdst = -1).
-          struct tm start_tm = today;
+          // 1st of the viewed month (current month + cal_month_offset),
+          // local midnight. mktime() normalizes the adjusted fields (and
+          // resolves DST via tm_isdst = -1).
+          struct tm view = today;
+          view.tm_mon += id(cal_month_offset);
+          view.tm_mday = 1;
+          view.tm_hour = 0; view.tm_min = 0; view.tm_sec = 0;
+          view.tm_isdst = -1;
+          mktime(&view);  // fills tm_wday of the 1st
+          // Grid start: Monday of the week containing the 1st.
+          struct tm start_tm = view;
           start_tm.tm_mday -= (start_tm.tm_wday + 6) % 7;  // tm_wday: 0=Sun
-          start_tm.tm_hour = 0; start_tm.tm_min = 0; start_tm.tm_sec = 0;
           start_tm.tm_isdst = -1;
           time_t start = mktime(&start_tm);
           id(cal_grid_start) = (long) start;
@@ -120,8 +137,9 @@ script:
             mktime(&d);
             snprintf(buf, sizeof(buf), "%d", d.tm_mday);
             lv_label_set_text(labels[i], buf);
-            bool in_month = (d.tm_mon == today.tm_mon && d.tm_year == today.tm_year);
-            bool is_today = in_month && (d.tm_mday == today.tm_mday);
+            bool in_month = (d.tm_mon == view.tm_mon && d.tm_year == view.tm_year);
+            bool is_today = (d.tm_year == today.tm_year && d.tm_mon == today.tm_mon
+                             && d.tm_mday == today.tm_mday);
             lv_obj_set_style_text_color(labels[i],
                 lv_color_hex(in_month ? 0xF2F0EB : 0x64748B), LV_PART_MAIN);
             lv_obj_set_style_bg_color(cells[i],
@@ -129,11 +147,11 @@ script:
           }
 
           char hdr[32];
-          strftime(hdr, sizeof(hdr), "%B %Y", &today);
+          strftime(hdr, sizeof(hdr), "%B %Y", &view);
           lv_label_set_text(id(cal_month_label), hdr);
 
   # Fetch all events in the 35-day window and show a dot on each day that has
-  # at least one. Multi-day events mark only their start day.
+  # at least one; multi-day events dot every day they cover.
   - id: cal_fetch_dots
     then:
       - if:

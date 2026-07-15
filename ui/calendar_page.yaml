@@ -1,4 +1,6 @@
-# Calendar page — rolling 5-week grid (Monday start), one cell per day.
+# Calendar page — month view, 5-week grid (Monday start), one cell per day.
+# </> in the top bar step through months; tapping the month label returns to
+# the current month.
 #
 # This is the PAGE HALF of the calendar feature (widget tree only). All logic
 # (grid rendering, event fetching, the day popup) lives in ui/calendar.yaml —
@@ -22,8 +24,10 @@ id: calendar_page
 bg_color: 0x0F172A
 bg_opa: COVER
 pad_all: 12
-# Re-render + refresh dots whenever the page is opened (swipe or tile).
+# Re-render + refresh dots whenever the page is opened (swipe or tile),
+# always starting on the current month.
 on_load:
+  - lambda: 'id(cal_month_offset) = 0;'
   - script.execute: cal_render_grid
   - script.execute: cal_fetch_dots
 layout:
@@ -33,7 +37,7 @@ layout:
   flex_align_cross: CENTER
   pad_row: 8
 widgets:
-  # ── Top bar: nav home | month header | spacer (keeps header centered) ──
+  # ── Top bar: nav home | < month header > | spacer (keeps header centered) ──
   - obj:
       width: 100%
       height: SIZE_CONTENT
@@ -57,11 +61,62 @@ widgets:
             on_click:
               - lvgl.page.show: main_page
 
-        - label:
-            id: cal_month_label
-            text: "Calendar"
-            text_font: montserrat_24
-            text_color: 0xF2F0EB
+        # Month navigation: < previous | header (tap = current month) | next >
+        - obj:
+            height: SIZE_CONTENT
+            width: SIZE_CONTENT
+            styles: [cal_group_style]
+            scrollable: false
+            layout:
+              type: flex
+              flex_flow: ROW
+              flex_align_cross: CENTER
+              pad_column: 10
+            widgets:
+              - button:
+                  width: 46
+                  height: 46
+                  styles: [cal_cell_style]
+                  widgets:
+                    - label:
+                        align: center
+                        text: "<"
+                        text_font: montserrat_22
+                        text_color: 0xF2F0EB
+                  on_click:
+                    - lambda: 'id(cal_month_offset) -= 1;'
+                    - script.execute: cal_render_grid
+                    - script.execute: cal_fetch_dots
+
+              # Fixed width (fits "September 2026") so the arrows don't
+              # shift as the month name length changes.
+              - label:
+                  id: cal_month_label
+                  text: "Calendar"
+                  text_font: montserrat_20
+                  text_color: 0xF2F0EB
+                  width: 160
+                  text_align: center
+                  clickable: true
+                  on_click:
+                    - lambda: 'id(cal_month_offset) = 0;'
+                    - script.execute: cal_render_grid
+                    - script.execute: cal_fetch_dots
+
+              - button:
+                  width: 46
+                  height: 46
+                  styles: [cal_cell_style]
+                  widgets:
+                    - label:
+                        align: center
+                        text: ">"
+                        text_font: montserrat_22
+                        text_color: 0xF2F0EB
+                  on_click:
+                    - lambda: 'id(cal_month_offset) += 1;'
+                    - script.execute: cal_render_grid
+                    - script.execute: cal_fetch_dots
 
         - obj:
             width: 90
