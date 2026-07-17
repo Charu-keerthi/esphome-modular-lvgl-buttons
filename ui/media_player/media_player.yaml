@@ -5,6 +5,11 @@ packages:
   # script and renders above its popup_scrim. Do NOT include popup_system here
   # as well, or popup_scrim/scripts would be defined twice.
   queue_popup: !include ../popup/queue_popup.yaml
+  # Spotify page LOGIC (sensors, scripts, album art). The page widget tree is
+  # included as a list item in lvgl.pages below so it lands right AFTER
+  # music_page in swipe order — package pages always merge before this file's
+  # own pages, so this package could not position the page itself.
+  spotify_logic: !include spotify.yaml
 
 globals:
   - id: media_elapsed_s
@@ -512,3 +517,8 @@ lvgl:
               - script.execute: media_volume_increase_5
 
       <<: !include ../../common/swipe_navigation.yaml
+
+    # Spotify "Now Playing" page — list item (not a package) so it sits HERE,
+    # immediately after music_page in swipe order. Logic lives in the
+    # spotify_logic package above (spotify.yaml).
+    - !include spotify_page.yaml
