@@ -152,8 +152,10 @@ widgets:
   # Per the reference image: play/pause is a solid green 64px circle; prev/next
   # are frosted-glass pills — LVGL can't blur, so the glass look is approximated
   # with a translucent white fill + faint white border over the dark bg.
+  # Transport row is aligned to the progress bar above it: prev starts at the
+  # bar's left edge (x 84), next ends at its right edge (x 384).
   - button:
-      x: 40
+      x: 84
       y: 367
       width: 110
       height: 54
@@ -176,7 +178,7 @@ widgets:
               entity_id: ${spotify_media_entity}
 
   - button:
-      x: 208
+      x: 202
       y: 362
       width: 64
       height: 64
@@ -198,7 +200,7 @@ widgets:
               entity_id: ${spotify_media_entity}
 
   - button:
-      x: 330
+      x: 274
       y: 367
       width: 110
       height: 54
