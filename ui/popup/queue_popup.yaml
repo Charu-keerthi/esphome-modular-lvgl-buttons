@@ -1,0 +1,474 @@
+---
+# Music Assistant queue popup for the media player page.
+#
+# Opens a near-full-screen modal listing up to 10 upcoming queue items in a
+# single scrollable column, each shown as "Title - Artist". Tapping an item
+# plays it. Closes via the "X" button, a tap outside (scrim), or the shared
+# auto-close timeout.
+#
+# Data path (no Home Assistant helper required):
+#   mp_fetch_queue calls the `mass_queue.get_queue_items` action with
+#   capture_response, flattens the queue to a small JSON array of
+#   {t: "Title - Artist", q: queue_item_id} in the response_template, and pushes
+#   the labels / id globals in on_success. Same mechanism as ui/weather/forecast.yaml.
+#
+# Requires (supplied by the including page / device config):
+#   ${media_player_entity}  - the Music Assistant media_player entity_id
+#   popup_system.yaml       - must be included BEFORE this file (scrim z-order)
+#   popup_timeout_seconds   - substitution consumed by popup_system.yaml
+#
+# To open (from the page):
+#   - script.execute: mp_fetch_queue
+#   - lvgl.widget.show: popup_scrim
+#   - lvgl.widget.show: popup_queue
+#   - script.execute: popup_start_timeout
+
+globals:
+  # Per-row queue_item_id holders, populated on each fetch. Used by the
+  # row's on_click to play that specific item.
+  - id: mp_qid_0
+    type: std::string
+    restore_value: no
+    initial_value: '""'
+  - id: mp_qid_1
+    type: std::string
+    restore_value: no
+    initial_value: '""'
+  - id: mp_qid_2
+    type: std::string
+    restore_value: no
+    initial_value: '""'
+  - id: mp_qid_3
+    type: std::string
+    restore_value: no
+    initial_value: '""'
+  - id: mp_qid_4
+    type: std::string
+    restore_value: no
+    initial_value: '""'
+  - id: mp_qid_5
+    type: std::string
+    restore_value: no
+    initial_value: '""'
+  - id: mp_qid_6
+    type: std::string
+    restore_value: no
+    initial_value: '""'
+  - id: mp_qid_7
+    type: std::string
+    restore_value: no
+    initial_value: '""'
+  - id: mp_qid_8
+    type: std::string
+    restore_value: no
+    initial_value: '""'
+  - id: mp_qid_9
+    type: std::string
+    restore_value: no
+    initial_value: '""'
+  # The queue_item_id of the row the user just tapped. Set by the row's on_click,
+  # read by mp_play_item. A plain global (not a script param) so it is reliably
+  # accessible inside the homeassistant.action variables lambda.
+  - id: mp_selected_qid
+    type: std::string
+    restore_value: no
+    initial_value: '""'
+  # media_content_id of the track currently playing on ${media_player_entity}.
+  # Kept in sync by a homeassistant text_sensor in media_player.yaml. Read in
+  # mp_fetch_queue's on_success to highlight the matching queue row in green.
+  # (We match device-side because the response_template runs in HA's limited
+  # environment and cannot read entity attributes itself.)
+  - id: mp_now_content_id
+    type: std::string
+    restore_value: no
+    initial_value: '""'
+
+script:
+  # Register with the shared close script so tap-outside / timeout also hides us.
+  - id: !extend popup_close
+    then:
+      - lvgl.widget.hide: popup_queue
+
+  # Play the item whose id is in mp_selected_qid, then close the popup. One
+  # shared script reused by all ten rows (each row sets mp_selected_qid first).
+  - id: mp_play_item
+    then:
+      - logger.log:
+          level: DEBUG
+          format: "Queue: play item id='%s'"
+          args: ['id(mp_selected_qid).c_str()']
+      - homeassistant.action:
+          action: mass_queue.play_queue_item
+          data:
+            entity: ${media_player_entity}
+          data_template:
+            queue_item_id: "{{ q }}"
+          variables:
+            q: !lambda 'return id(mp_selected_qid);'
+      - script.execute: popup_close
+
+  # Fetch the queue and populate the 10 rows.
+  - id: mp_fetch_queue
+    then:
+      - homeassistant.action:
+          action: mass_queue.get_queue_items
+          # NOTE: do NOT pass limit_before/limit_after here. ESPHome sends all
+          # service data as strings, and mass_queue's numeric limit fields reject
+          # strings (HTTP 400 -> on_error). We rely on the service defaults and
+          # slice the first 10 items in the response_template instead.
+          data:
+            entity: ${media_player_entity}
+          capture_response: true
+          # Flatten the queue to a small JSON array of {t: "Title - Artist", q: id}.
+          # Kept to single-line Jinja statements so the folded (>-) scalar renders
+          # cleanly. `| default([], true)` guards an empty/idle queue. Artist is
+          # appended only when present, so title-only items don't get a dangling " - ".
+          # NOTE: this template is rendered by Home Assistant in a *limited*
+          # template environment (no state access). Do NOT call state_attr /
+          # states / now() here — they raise and the render returns empty
+          # (on_success then reports 0 items). We only emit `response` + item
+          # fields; the "currently playing" match is done device-side in
+          # on_success by comparing `i` (media_content_id) to mp_now_content_id.
+          response_template: >-
+            {% set items = response["${media_player_entity}"] | default([], true) %}
+            {% set ns = namespace(r=[]) %}
+            {% for it in items[:10] %}
+            {% set title = it.media_title | default('') %}
+            {% set artist = it.media_artist | default('') %}
+            {% set label = title ~ ' - ' ~ artist if artist else title %}
+            {% set ns.r = ns.r + [{'t': label, 'q': it.queue_item_id | default(''), 'i': it.media_content_id | default('')}] %}
+            {% endfor %}
+            {{ ns.r | tojson }}
+          on_success:
+            - lambda: |-
+                auto arr = response["response"];
+                int n = arr.size();
+                lv_obj_t* btns[10] = {
+                  id(queue_btn_0), id(queue_btn_1), id(queue_btn_2), id(queue_btn_3),
+                  id(queue_btn_4), id(queue_btn_5), id(queue_btn_6), id(queue_btn_7),
+                  id(queue_btn_8), id(queue_btn_9) };
+                lv_obj_t* lbls[10] = {
+                  id(queue_item_0), id(queue_item_1), id(queue_item_2), id(queue_item_3),
+                  id(queue_item_4), id(queue_item_5), id(queue_item_6), id(queue_item_7),
+                  id(queue_item_8), id(queue_item_9) };
+                std::string* qids[10] = {
+                  &id(mp_qid_0), &id(mp_qid_1), &id(mp_qid_2), &id(mp_qid_3),
+                  &id(mp_qid_4), &id(mp_qid_5), &id(mp_qid_6), &id(mp_qid_7),
+                  &id(mp_qid_8), &id(mp_qid_9) };
+                std::string cur_id = id(mp_now_content_id);
+                bool matched = false;   // highlight only the first matching row
+                for (int i = 0; i < 10; i++) {
+                  std::string title;
+                  bool current = false;
+                  if (i < n) {
+                    title = arr[i]["t"].as<std::string>();
+                    *qids[i] = arr[i]["q"].as<std::string>();
+                    std::string item_id = arr[i]["i"].as<std::string>();
+                    if (!matched && !cur_id.empty() && item_id == cur_id) {
+                      current = true;
+                      matched = true;
+                    }
+                  } else {
+                    *qids[i] = "";
+                  }
+                  lv_label_set_text(lbls[i], title.c_str());
+                  // Highlight the currently-playing track in green; every other
+                  // row uses the default label color (reset each fetch).
+                  lv_obj_set_style_text_color(lbls[i],
+                      lv_color_hex(current ? 0x22C55E : 0xF2F0EB), LV_PART_MAIN);
+                  // Hide empty rows so the popup only shows real queue items.
+                  if (title.empty()) {
+                    lv_obj_add_flag(btns[i], LV_OBJ_FLAG_HIDDEN);
+                  } else {
+                    lv_obj_clear_flag(btns[i], LV_OBJ_FLAG_HIDDEN);
+                  }
+                }
+            - logger.log:
+                level: DEBUG
+                format: "Queue popup refreshed (%d items)"
+                args: ['(int) response["response"].size()']
+          on_error:
+            - logger.log:
+                level: ERROR
+                format: "mass_queue.get_queue_items failed for ${media_player_entity}"
+
+lvgl:
+  style_definitions:
+    - id: queue_row_style
+      bg_color: 0x1E293B
+      bg_opa: COVER
+      radius: 10
+      border_width: 0
+      pad_all: 10
+
+  top_layer:
+    widgets:
+      # Near-full-screen modal. Sibling to popup_scrim (declared first in
+      # popup_system.yaml so the scrim renders beneath this).
+      - obj:
+          id: popup_queue
+          hidden: true
+          align: CENTER
+          width: 95%
+          height: 95%
+          radius: 16
+          bg_color: 0x0F172A
+          bg_opa: COVER
+          border_width: 2
+          border_color: 0x334155
+          pad_all: 12
+          # Consume taps inside the popup so they don't fall through to the scrim.
+          clickable: true
+          widgets:
+            # Header
+            - label:
+                align: top_left
+                text: "Up Next"
+                text_font: montserrat_22
+                text_color: 0xF2F0EB
+
+            # Close "X" button — top right
+            - button:
+                align: top_right
+                width: 44
+                height: 44
+                bg_color: 0x334155
+                bg_opa: COVER
+                radius: 12
+                widgets:
+                  - label:
+                      align: center
+                      text: "X"
+                      text_font: montserrat_22
+                      text_color: 0xF2F0EB
+                on_click:
+                  - script.execute: popup_close
+
+            # Single scrollable column of queue rows, below the header. The
+            # container overflows vertically once more than a few rows are shown,
+            # so scrollable: true lets the user scroll through all 10 items.
+            - obj:
+                align: bottom_mid
+                width: 100%
+                height: 88%
+                bg_opa: TRANSP
+                border_width: 0
+                pad_all: 0
+                pad_right: 6          # room for the scrollbar so it doesn't overlap text
+                scrollable: true
+                scrollbar_mode: AUTO
+                layout:
+                  type: FLEX
+                  flex_flow: COLUMN
+                  pad_row: 6
+                widgets:
+                  - button:
+                      id: queue_btn_0
+                      hidden: true
+                      styles: [queue_row_style]
+                      width: 100%
+                      height: 76
+                      widgets:
+                        - label:
+                            id: queue_item_0
+                            align: left_mid
+                            width: 100%
+                            # Bound to two lines of nunito_20 (~28px each) so long_mode:dot
+                            # wraps at most two lines and ellipsizes the rest instead of
+                            # overflowing the button with a third line.
+                            height: 56
+                            long_mode: dot
+                            text: ""
+                            text_color: 0xF2F0EB
+                      on_click:
+                        - lambda: 'id(mp_selected_qid) = id(mp_qid_0);'
+                        - script.execute: mp_play_item
+                  - button:
+                      id: queue_btn_1
+                      hidden: true
+                      styles: [queue_row_style]
+                      width: 100%
+                      height: 76
+                      widgets:
+                        - label:
+                            id: queue_item_1
+                            align: left_mid
+                            width: 100%
+                            # Bound to two lines of nunito_20 (~28px each) so long_mode:dot
+                            # wraps at most two lines and ellipsizes the rest instead of
+                            # overflowing the button with a third line.
+                            height: 56
+                            long_mode: dot
+                            text: ""
+                            text_color: 0xF2F0EB
+                      on_click:
+                        - lambda: 'id(mp_selected_qid) = id(mp_qid_1);'
+                        - script.execute: mp_play_item
+                  - button:
+                      id: queue_btn_2
+                      hidden: true
+                      styles: [queue_row_style]
+                      width: 100%
+                      height: 76
+                      widgets:
+                        - label:
+                            id: queue_item_2
+                            align: left_mid
+                            width: 100%
+                            # Bound to two lines of nunito_20 (~28px each) so long_mode:dot
+                            # wraps at most two lines and ellipsizes the rest instead of
+                            # overflowing the button with a third line.
+                            height: 56
+                            long_mode: dot
+                            text: ""
+                            text_color: 0xF2F0EB
+                      on_click:
+                        - lambda: 'id(mp_selected_qid) = id(mp_qid_2);'
+                        - script.execute: mp_play_item
+                  - button:
+                      id: queue_btn_3
+                      hidden: true
+                      styles: [queue_row_style]
+                      width: 100%
+                      height: 76
+                      widgets:
+                        - label:
+                            id: queue_item_3
+                            align: left_mid
+                            width: 100%
+                            # Bound to two lines of nunito_20 (~28px each) so long_mode:dot
+                            # wraps at most two lines and ellipsizes the rest instead of
+                            # overflowing the button with a third line.
+                            height: 56
+                            long_mode: dot
+                            text: ""
+                            text_color: 0xF2F0EB
+                      on_click:
+                        - lambda: 'id(mp_selected_qid) = id(mp_qid_3);'
+                        - script.execute: mp_play_item
+                  - button:
+                      id: queue_btn_4
+                      hidden: true
+                      styles: [queue_row_style]
+                      width: 100%
+                      height: 76
+                      widgets:
+                        - label:
+                            id: queue_item_4
+                            align: left_mid
+                            width: 100%
+                            # Bound to two lines of nunito_20 (~28px each) so long_mode:dot
+                            # wraps at most two lines and ellipsizes the rest instead of
+                            # overflowing the button with a third line.
+                            height: 56
+                            long_mode: dot
+                            text: ""
+                            text_color: 0xF2F0EB
+                      on_click:
+                        - lambda: 'id(mp_selected_qid) = id(mp_qid_4);'
+                        - script.execute: mp_play_item
+                  - button:
+                      id: queue_btn_5
+                      hidden: true
+                      styles: [queue_row_style]
+                      width: 100%
+                      height: 76
+                      widgets:
+                        - label:
+                            id: queue_item_5
+                            align: left_mid
+                            width: 100%
+                            # Bound to two lines of nunito_20 (~28px each) so long_mode:dot
+                            # wraps at most two lines and ellipsizes the rest instead of
+                            # overflowing the button with a third line.
+                            height: 56
+                            long_mode: dot
+                            text: ""
+                            text_color: 0xF2F0EB
+                      on_click:
+                        - lambda: 'id(mp_selected_qid) = id(mp_qid_5);'
+                        - script.execute: mp_play_item
+                  - button:
+                      id: queue_btn_6
+                      hidden: true
+                      styles: [queue_row_style]
+                      width: 100%
+                      height: 76
+                      widgets:
+                        - label:
+                            id: queue_item_6
+                            align: left_mid
+                            width: 100%
+                            # Bound to two lines of nunito_20 (~28px each) so long_mode:dot
+                            # wraps at most two lines and ellipsizes the rest instead of
+                            # overflowing the button with a third line.
+                            height: 56
+                            long_mode: dot
+                            text: ""
+                            text_color: 0xF2F0EB
+                      on_click:
+                        - lambda: 'id(mp_selected_qid) = id(mp_qid_6);'
+                        - script.execute: mp_play_item
+                  - button:
+                      id: queue_btn_7
+                      hidden: true
+                      styles: [queue_row_style]
+                      width: 100%
+                      height: 76
+                      widgets:
+                        - label:
+                            id: queue_item_7
+                            align: left_mid
+                            width: 100%
+                            # Bound to two lines of nunito_20 (~28px each) so long_mode:dot
+                            # wraps at most two lines and ellipsizes the rest instead of
+                            # overflowing the button with a third line.
+                            height: 56
+                            long_mode: dot
+                            text: ""
+                            text_color: 0xF2F0EB
+                      on_click:
+                        - lambda: 'id(mp_selected_qid) = id(mp_qid_7);'
+                        - script.execute: mp_play_item
+                  - button:
+                      id: queue_btn_8
+                      hidden: true
+                      styles: [queue_row_style]
+                      width: 100%
+                      height: 76
+                      widgets:
+                        - label:
+                            id: queue_item_8
+                            align: left_mid
+                            width: 100%
+                            # Bound to two lines of nunito_20 (~28px each) so long_mode:dot
+                            # wraps at most two lines and ellipsizes the rest instead of
+                            # overflowing the button with a third line.
+                            height: 56
+                            long_mode: dot
+                            text: ""
+                            text_color: 0xF2F0EB
+                      on_click:
+                        - lambda: 'id(mp_selected_qid) = id(mp_qid_8);'
+                        - script.execute: mp_play_item
+                  - button:
+                      id: queue_btn_9
+                      hidden: true
+                      styles: [queue_row_style]
+                      width: 100%
+                      height: 76
+                      widgets:
+                        - label:
+                            id: queue_item_9
+                            align: left_mid
+                            width: 100%
+                            # Bound to two lines of nunito_20 (~28px each) so long_mode:dot
+                            # wraps at most two lines and ellipsizes the rest instead of
+                            # overflowing the button with a third line.
+                            height: 56
+                            long_mode: dot
+                            text: ""
+                            text_color: 0xF2F0EB
+                      on_click:
+                        - lambda: 'id(mp_selected_qid) = id(mp_qid_9);'
+                        - script.execute: mp_play_item

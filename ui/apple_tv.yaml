@@ -1,0 +1,358 @@
+# Apple TV remote page — full-screen d-pad remote for an Apple TV via Home Assistant.
+#
+# Required substitutions (define in the device yaml):
+#   apple_tv_media_entity:  HA media_player entity, e.g. media_player.living_room_2
+#   apple_tv_remote_entity: HA remote entity,       e.g. remote.living_room_2
+#
+# Include from the device yaml:
+#   packages:
+#     apple_tv_screen: !include esphome-modular-lvgl-buttons/ui/apple_tv.yaml
+#
+# Requires these glyphs in the device's mdi_icons_40 font:
+#   $mdi_home $mdi_power $mdi_chevron_up $mdi_chevron_down $mdi_chevron_left
+#   $mdi_chevron_right $mdi_undo_variant $mdi_television $mdi_play $mdi_pause
+#   $mdi_youtube $mdi_apple $mdi_volume_minus $mdi_volume_plus
+#
+# The Apple TV media_player does not support VOLUME_MUTE, so there is no mute
+# button; power uses media_player.toggle (TURN_ON/TURN_OFF are supported).
+
+text_sensor:
+  - platform: homeassistant
+    id: atv_media_state
+    entity_id: ${apple_tv_media_entity}
+    on_value:
+      # Play/pause is one toggle button; icon mirrors the player state.
+      - lvgl.label.update:
+          id: atv_play_pause_icon
+          text: !lambda |-
+            return std::string(x == "playing" ? "$mdi_pause" : "$mdi_play");
+      # Power button glows accent-blue while the Apple TV is awake.
+      - if:
+          condition:
+            lambda: |-
+              return x.empty() || x == "off" || x == "standby" || x == "unavailable" || x == "unknown";
+          then:
+            - lvgl.widget.update:
+                id: atv_power_btn
+                bg_color: 0x334155
+          else:
+            - lvgl.widget.update:
+                id: atv_power_btn
+                bg_color: 0x2563EB
+
+lvgl:
+  style_definitions:
+    - id: atv_button_style
+      bg_color: 0x334155
+      bg_opa: COVER
+      radius: 16
+      border_width: 0
+
+    - id: atv_accent_style
+      bg_color: 0x2563EB
+      bg_opa: COVER
+      radius: 16
+      border_width: 0
+
+    # Transparent flex/grid wrapper — no chrome, no scrollbars.
+    - id: atv_group_style
+      bg_opa: TRANSP
+      border_width: 0
+      pad_all: 0
+
+  pages:
+    - id: apple_tv_page
+      bg_color: 0x0F172A
+      bg_opa: COVER
+      pad_all: 16
+      layout:
+        type: flex
+        flex_flow: COLUMN
+        flex_align_main: START
+        flex_align_cross: CENTER
+        pad_row: 14
+      widgets:
+        # ── Top bar: nav home | title | power toggle ────────────────────
+        - obj:
+            width: 100%
+            height: SIZE_CONTENT
+            styles: [atv_group_style]
+            scrollable: false
+            layout:
+              type: flex
+              flex_flow: ROW
+              flex_align_main: SPACE_BETWEEN
+              flex_align_cross: CENTER
+            widgets:
+              - button:
+                  width: 90
+                  height: 46
+                  styles: [atv_accent_style]
+                  widgets:
+                    - label:
+                        text_font: mdi_icons_40
+                        align: center
+                        text: "$mdi_home"
+                  on_click:
+                    - lvgl.page.show: main_page
+
+              - label:
+                  text: "Apple TV"
+                  text_font: montserrat_24
+
+              - button:
+                  id: atv_power_btn
+                  width: 90
+                  height: 46
+                  styles: [atv_button_style]
+                  widgets:
+                    - label:
+                        text_font: mdi_icons_40
+                        align: center
+                        text: "$mdi_power"
+                  on_click:
+                    - homeassistant.service:
+                        service: media_player.toggle
+                        data:
+                          entity_id: ${apple_tv_media_entity}
+
+        # ── D-pad: 3x3 grid, arrows around a central OK/select ──────────
+        - obj:
+            width: 100%
+            flex_grow: 1
+            styles: [atv_group_style]
+            scrollable: false
+            layout:
+              type: grid
+              grid_columns: [fr(1), fr(1), fr(1)]
+              grid_rows: [fr(1), fr(1), fr(1)]
+              pad_column: 12
+              pad_row: 12
+            widgets:
+              # Corner shortcuts: app launchers on top, volume on the bottom.
+              - button:
+                  grid_cell_row_pos: 0
+                  grid_cell_column_pos: 0
+                  grid_cell_x_align: stretch
+                  grid_cell_y_align: stretch
+                  styles: [atv_button_style]
+                  bg_color: 0xFFFFFF
+                  widgets:
+                    - label:
+                        text_font: mdi_icons_40
+                        align: center
+                        text: "$mdi_youtube"
+                        text_color: 0xFF0000
+                  on_click:
+                    - homeassistant.service:
+                        service: media_player.select_source
+                        data:
+                          entity_id: ${apple_tv_media_entity}
+                          source: YouTube
+
+              - button:
+                  grid_cell_row_pos: 0
+                  grid_cell_column_pos: 2
+                  grid_cell_x_align: stretch
+                  grid_cell_y_align: stretch
+                  styles: [atv_button_style]
+                  bg_color: 0x000000
+                  widgets:
+                    - label:
+                        text_font: mdi_icons_40
+                        align: center
+                        text: "$mdi_apple"
+                  on_click:
+                    - homeassistant.service:
+                        service: media_player.select_source
+                        data:
+                          entity_id: ${apple_tv_media_entity}
+                          source: TV
+
+              - button:
+                  grid_cell_row_pos: 2
+                  grid_cell_column_pos: 0
+                  grid_cell_x_align: stretch
+                  grid_cell_y_align: stretch
+                  styles: [atv_button_style]
+                  widgets:
+                    - label:
+                        text_font: mdi_icons_40
+                        align: center
+                        text: "$mdi_volume_minus"
+                  on_click:
+                    - homeassistant.service:
+                        service: media_player.volume_down
+                        data:
+                          entity_id: ${apple_tv_media_entity}
+
+              - button:
+                  grid_cell_row_pos: 2
+                  grid_cell_column_pos: 2
+                  grid_cell_x_align: stretch
+                  grid_cell_y_align: stretch
+                  styles: [atv_button_style]
+                  widgets:
+                    - label:
+                        text_font: mdi_icons_40
+                        align: center
+                        text: "$mdi_volume_plus"
+                  on_click:
+                    - homeassistant.service:
+                        service: media_player.volume_up
+                        data:
+                          entity_id: ${apple_tv_media_entity}
+
+              - button:
+                  grid_cell_row_pos: 0
+                  grid_cell_column_pos: 1
+                  grid_cell_x_align: stretch
+                  grid_cell_y_align: stretch
+                  styles: [atv_button_style]
+                  widgets:
+                    - label:
+                        text_font: mdi_icons_40
+                        align: center
+                        text: "$mdi_chevron_up"
+                  on_click:
+                    - homeassistant.service:
+                        service: remote.send_command
+                        data:
+                          entity_id: ${apple_tv_remote_entity}
+                          command: up
+
+              - button:
+                  grid_cell_row_pos: 1
+                  grid_cell_column_pos: 0
+                  grid_cell_x_align: stretch
+                  grid_cell_y_align: stretch
+                  styles: [atv_button_style]
+                  widgets:
+                    - label:
+                        text_font: mdi_icons_40
+                        align: center
+                        text: "$mdi_chevron_left"
+                  on_click:
+                    - homeassistant.service:
+                        service: remote.send_command
+                        data:
+                          entity_id: ${apple_tv_remote_entity}
+                          command: left
+
+              - button:
+                  grid_cell_row_pos: 1
+                  grid_cell_column_pos: 1
+                  grid_cell_x_align: stretch
+                  grid_cell_y_align: stretch
+                  styles: [atv_accent_style]
+                  radius: 100
+                  widgets:
+                    - label:
+                        align: center
+                        text: "OK"
+                        text_font: montserrat_24
+                  on_click:
+                    - homeassistant.service:
+                        service: remote.send_command
+                        data:
+                          entity_id: ${apple_tv_remote_entity}
+                          command: select
+
+              - button:
+                  grid_cell_row_pos: 1
+                  grid_cell_column_pos: 2
+                  grid_cell_x_align: stretch
+                  grid_cell_y_align: stretch
+                  styles: [atv_button_style]
+                  widgets:
+                    - label:
+                        text_font: mdi_icons_40
+                        align: center
+                        text: "$mdi_chevron_right"
+                  on_click:
+                    - homeassistant.service:
+                        service: remote.send_command
+                        data:
+                          entity_id: ${apple_tv_remote_entity}
+                          command: right
+
+              - button:
+                  grid_cell_row_pos: 2
+                  grid_cell_column_pos: 1
+                  grid_cell_x_align: stretch
+                  grid_cell_y_align: stretch
+                  styles: [atv_button_style]
+                  widgets:
+                    - label:
+                        text_font: mdi_icons_40
+                        align: center
+                        text: "$mdi_chevron_down"
+                  on_click:
+                    - homeassistant.service:
+                        service: remote.send_command
+                        data:
+                          entity_id: ${apple_tv_remote_entity}
+                          command: down
+
+        # ── Bottom bar: back | ATV home | play-pause ─────────────────────
+        - obj:
+            width: 100%
+            height: 84
+            styles: [atv_group_style]
+            scrollable: false
+            layout:
+              type: flex
+              flex_flow: ROW
+              flex_align_main: SPACE_EVENLY
+              flex_align_cross: CENTER
+              pad_column: 12
+            widgets:
+              - button:
+                  flex_grow: 1
+                  height: 100%
+                  styles: [atv_button_style]
+                  widgets:
+                    - label:
+                        text_font: mdi_icons_40
+                        align: center
+                        text: "$mdi_undo_variant"
+                  on_click:
+                    - homeassistant.service:
+                        service: remote.send_command
+                        data:
+                          entity_id: ${apple_tv_remote_entity}
+                          command: menu
+
+              - button:
+                  flex_grow: 1
+                  height: 100%
+                  styles: [atv_button_style]
+                  widgets:
+                    - label:
+                        text_font: mdi_icons_40
+                        align: center
+                        text: "$mdi_television"
+                  on_click:
+                    - homeassistant.service:
+                        service: remote.send_command
+                        data:
+                          entity_id: ${apple_tv_remote_entity}
+                          command: home
+
+              - button:
+                  flex_grow: 1
+                  height: 100%
+                  styles: [atv_accent_style]
+                  widgets:
+                    - label:
+                        id: atv_play_pause_icon
+                        text_font: mdi_icons_40
+                        align: center
+                        text: "$mdi_play"
+                  on_click:
+                    - homeassistant.service:
+                        service: media_player.media_play_pause
+                        data:
+                          entity_id: ${apple_tv_media_entity}
+
+      <<: !include ../common/swipe_navigation.yaml

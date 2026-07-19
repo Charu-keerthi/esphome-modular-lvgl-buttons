@@ -1,0 +1,1175 @@
+# Calendar page — month view, 5-week grid (Monday start), one cell per day.
+# </> in the top bar step through months; tapping the month label returns to
+# the current month.
+#
+# This is the PAGE HALF of the calendar feature (widget tree only). All logic
+# (grid rendering, event fetching, the day popup) lives in ui/calendar.yaml —
+# include that via `packages:` and include THIS file as a list item inside the
+# device yaml's `lvgl.pages`, positioned where the page should sit in swipe
+# order (ESPHome appends package pages BEFORE the device yaml's own pages, so
+# a package could not place this page after weather_page):
+#
+#   lvgl:
+#     pages:
+#       # ... existing pages ...
+#       - !include esphome-modular-lvgl-buttons/ui/calendar_page.yaml
+#
+# Cell ids consumed by ui/calendar.yaml scripts:
+#   cal_c0..cal_c34     day cell buttons (bg swapped for "today" highlight)
+#   cal_l0..cal_l34     day-number labels
+#   cal_dot_0..cal_dot_34  event-indicator dots (hidden unless day has events)
+#   cal_month_label     "July 2026" header
+
+id: calendar_page
+bg_color: 0x0F172A
+bg_opa: COVER
+pad_all: 12
+# Re-render + refresh dots whenever the page is opened (swipe or tile),
+# always starting on the current month.
+on_load:
+  - lambda: 'id(cal_month_offset) = 0;'
+  - script.execute: cal_render_grid
+  - script.execute: cal_fetch_dots
+layout:
+  type: flex
+  flex_flow: COLUMN
+  flex_align_main: START
+  flex_align_cross: CENTER
+  pad_row: 8
+widgets:
+  # ── Top bar: nav home | < month header > | spacer (keeps header centered) ──
+  - obj:
+      width: 100%
+      height: SIZE_CONTENT
+      styles: [cal_group_style]
+      scrollable: false
+      layout:
+        type: flex
+        flex_flow: ROW
+        flex_align_main: SPACE_BETWEEN
+        flex_align_cross: CENTER
+      widgets:
+        - button:
+            width: 90
+            height: 46
+            styles: [cal_accent_style]
+            widgets:
+              - label:
+                  text_font: mdi_icons_40
+                  align: center
+                  text: "$mdi_home"
+            on_click:
+              - lvgl.page.show: main_page
+
+        # Month navigation: < previous | header (tap = current month) | next >
+        - obj:
+            height: SIZE_CONTENT
+            width: SIZE_CONTENT
+            styles: [cal_group_style]
+            scrollable: false
+            layout:
+              type: flex
+              flex_flow: ROW
+              flex_align_cross: CENTER
+              pad_column: 10
+            widgets:
+              - button:
+                  width: 46
+                  height: 46
+                  styles: [cal_cell_style]
+                  widgets:
+                    - label:
+                        align: center
+                        text: "<"
+                        text_font: montserrat_22
+                        text_color: 0xF2F0EB
+                  on_click:
+                    - lambda: 'id(cal_month_offset) -= 1;'
+                    - script.execute: cal_render_grid
+                    - script.execute: cal_fetch_dots
+
+              # Fixed width (fits "September 2026") so the arrows don't
+              # shift as the month name length changes.
+              - label:
+                  id: cal_month_label
+                  text: "Calendar"
+                  text_font: montserrat_20
+                  text_color: 0xF2F0EB
+                  width: 160
+                  text_align: center
+                  clickable: true
+                  on_click:
+                    - lambda: 'id(cal_month_offset) = 0;'
+                    - script.execute: cal_render_grid
+                    - script.execute: cal_fetch_dots
+
+              - button:
+                  width: 46
+                  height: 46
+                  styles: [cal_cell_style]
+                  widgets:
+                    - label:
+                        align: center
+                        text: ">"
+                        text_font: montserrat_22
+                        text_color: 0xF2F0EB
+                  on_click:
+                    - lambda: 'id(cal_month_offset) += 1;'
+                    - script.execute: cal_render_grid
+                    - script.execute: cal_fetch_dots
+
+        - obj:
+            width: 90
+            height: 46
+            styles: [cal_group_style]
+
+  # ── Weekday header: Mo..Su, aligned with the 7 grid columns below ──
+  - obj:
+      width: 100%
+      height: SIZE_CONTENT
+      styles: [cal_group_style]
+      scrollable: false
+      layout:
+        type: grid
+        grid_columns: [fr(1), fr(1), fr(1), fr(1), fr(1), fr(1), fr(1)]
+        grid_rows: [content]
+        pad_column: 4
+      widgets:
+        - label:
+            grid_cell_row_pos: 0
+            grid_cell_column_pos: 0
+            grid_cell_x_align: center
+            text: "Mo"
+            text_color: 0x94A3B8
+        - label:
+            grid_cell_row_pos: 0
+            grid_cell_column_pos: 1
+            grid_cell_x_align: center
+            text: "Tu"
+            text_color: 0x94A3B8
+        - label:
+            grid_cell_row_pos: 0
+            grid_cell_column_pos: 2
+            grid_cell_x_align: center
+            text: "We"
+            text_color: 0x94A3B8
+        - label:
+            grid_cell_row_pos: 0
+            grid_cell_column_pos: 3
+            grid_cell_x_align: center
+            text: "Th"
+            text_color: 0x94A3B8
+        - label:
+            grid_cell_row_pos: 0
+            grid_cell_column_pos: 4
+            grid_cell_x_align: center
+            text: "Fr"
+            text_color: 0x94A3B8
+        - label:
+            grid_cell_row_pos: 0
+            grid_cell_column_pos: 5
+            grid_cell_x_align: center
+            text: "Sa"
+            text_color: 0x94A3B8
+        - label:
+            grid_cell_row_pos: 0
+            grid_cell_column_pos: 6
+            grid_cell_x_align: center
+            text: "Su"
+            text_color: 0x94A3B8
+
+  # ── Day grid: 5 weeks x 7 days, cells stretch to fill the page ──
+  - obj:
+      width: 100%
+      flex_grow: 1
+      styles: [cal_group_style]
+      scrollable: false
+      layout:
+        type: grid
+        grid_columns: [fr(1), fr(1), fr(1), fr(1), fr(1), fr(1), fr(1)]
+        grid_rows: [fr(1), fr(1), fr(1), fr(1), fr(1)]
+        pad_column: 4
+        pad_row: 4
+      widgets:
+        - button:
+            id: cal_c0
+            grid_cell_row_pos: 0
+            grid_cell_column_pos: 0
+            grid_cell_x_align: stretch
+            grid_cell_y_align: stretch
+            styles: [cal_cell_style]
+            pad_all: 2
+            widgets:
+              - label:
+                  id: cal_l0
+                  align: top_mid
+                  text: ""
+                  text_font: montserrat_18
+                  text_color: 0xF2F0EB
+              - obj:
+                  id: cal_dot_0
+                  hidden: true
+                  width: 12
+                  height: 12
+                  radius: 6
+                  bg_color: 0xFBBF24
+                  bg_opa: COVER
+                  border_width: 0
+                  align: bottom_mid
+            on_click:
+              - lambda: 'id(cal_selected_idx) = 0;'
+              - script.execute: cal_open_day
+        - button:
+            id: cal_c1
+            grid_cell_row_pos: 0
+            grid_cell_column_pos: 1
+            grid_cell_x_align: stretch
+            grid_cell_y_align: stretch
+            styles: [cal_cell_style]
+            pad_all: 2
+            widgets:
+              - label:
+                  id: cal_l1
+                  align: top_mid
+                  text: ""
+                  text_font: montserrat_18
+                  text_color: 0xF2F0EB
+              - obj:
+                  id: cal_dot_1
+                  hidden: true
+                  width: 12
+                  height: 12
+                  radius: 6
+                  bg_color: 0xFBBF24
+                  bg_opa: COVER
+                  border_width: 0
+                  align: bottom_mid
+            on_click:
+              - lambda: 'id(cal_selected_idx) = 1;'
+              - script.execute: cal_open_day
+        - button:
+            id: cal_c2
+            grid_cell_row_pos: 0
+            grid_cell_column_pos: 2
+            grid_cell_x_align: stretch
+            grid_cell_y_align: stretch
+            styles: [cal_cell_style]
+            pad_all: 2
+            widgets:
+              - label:
+                  id: cal_l2
+                  align: top_mid
+                  text: ""
+                  text_font: montserrat_18
+                  text_color: 0xF2F0EB
+              - obj:
+                  id: cal_dot_2
+                  hidden: true
+                  width: 12
+                  height: 12
+                  radius: 6
+                  bg_color: 0xFBBF24
+                  bg_opa: COVER
+                  border_width: 0
+                  align: bottom_mid
+            on_click:
+              - lambda: 'id(cal_selected_idx) = 2;'
+              - script.execute: cal_open_day
+        - button:
+            id: cal_c3
+            grid_cell_row_pos: 0
+            grid_cell_column_pos: 3
+            grid_cell_x_align: stretch
+            grid_cell_y_align: stretch
+            styles: [cal_cell_style]
+            pad_all: 2
+            widgets:
+              - label:
+                  id: cal_l3
+                  align: top_mid
+                  text: ""
+                  text_font: montserrat_18
+                  text_color: 0xF2F0EB
+              - obj:
+                  id: cal_dot_3
+                  hidden: true
+                  width: 12
+                  height: 12
+                  radius: 6
+                  bg_color: 0xFBBF24
+                  bg_opa: COVER
+                  border_width: 0
+                  align: bottom_mid
+            on_click:
+              - lambda: 'id(cal_selected_idx) = 3;'
+              - script.execute: cal_open_day
+        - button:
+            id: cal_c4
+            grid_cell_row_pos: 0
+            grid_cell_column_pos: 4
+            grid_cell_x_align: stretch
+            grid_cell_y_align: stretch
+            styles: [cal_cell_style]
+            pad_all: 2
+            widgets:
+              - label:
+                  id: cal_l4
+                  align: top_mid
+                  text: ""
+                  text_font: montserrat_18
+                  text_color: 0xF2F0EB
+              - obj:
+                  id: cal_dot_4
+                  hidden: true
+                  width: 12
+                  height: 12
+                  radius: 6
+                  bg_color: 0xFBBF24
+                  bg_opa: COVER
+                  border_width: 0
+                  align: bottom_mid
+            on_click:
+              - lambda: 'id(cal_selected_idx) = 4;'
+              - script.execute: cal_open_day
+        - button:
+            id: cal_c5
+            grid_cell_row_pos: 0
+            grid_cell_column_pos: 5
+            grid_cell_x_align: stretch
+            grid_cell_y_align: stretch
+            styles: [cal_cell_style]
+            pad_all: 2
+            widgets:
+              - label:
+                  id: cal_l5
+                  align: top_mid
+                  text: ""
+                  text_font: montserrat_18
+                  text_color: 0xF2F0EB
+              - obj:
+                  id: cal_dot_5
+                  hidden: true
+                  width: 12
+                  height: 12
+                  radius: 6
+                  bg_color: 0xFBBF24
+                  bg_opa: COVER
+                  border_width: 0
+                  align: bottom_mid
+            on_click:
+              - lambda: 'id(cal_selected_idx) = 5;'
+              - script.execute: cal_open_day
+        - button:
+            id: cal_c6
+            grid_cell_row_pos: 0
+            grid_cell_column_pos: 6
+            grid_cell_x_align: stretch
+            grid_cell_y_align: stretch
+            styles: [cal_cell_style]
+            pad_all: 2
+            widgets:
+              - label:
+                  id: cal_l6
+                  align: top_mid
+                  text: ""
+                  text_font: montserrat_18
+                  text_color: 0xF2F0EB
+              - obj:
+                  id: cal_dot_6
+                  hidden: true
+                  width: 12
+                  height: 12
+                  radius: 6
+                  bg_color: 0xFBBF24
+                  bg_opa: COVER
+                  border_width: 0
+                  align: bottom_mid
+            on_click:
+              - lambda: 'id(cal_selected_idx) = 6;'
+              - script.execute: cal_open_day
+        - button:
+            id: cal_c7
+            grid_cell_row_pos: 1
+            grid_cell_column_pos: 0
+            grid_cell_x_align: stretch
+            grid_cell_y_align: stretch
+            styles: [cal_cell_style]
+            pad_all: 2
+            widgets:
+              - label:
+                  id: cal_l7
+                  align: top_mid
+                  text: ""
+                  text_font: montserrat_18
+                  text_color: 0xF2F0EB
+              - obj:
+                  id: cal_dot_7
+                  hidden: true
+                  width: 12
+                  height: 12
+                  radius: 6
+                  bg_color: 0xFBBF24
+                  bg_opa: COVER
+                  border_width: 0
+                  align: bottom_mid
+            on_click:
+              - lambda: 'id(cal_selected_idx) = 7;'
+              - script.execute: cal_open_day
+        - button:
+            id: cal_c8
+            grid_cell_row_pos: 1
+            grid_cell_column_pos: 1
+            grid_cell_x_align: stretch
+            grid_cell_y_align: stretch
+            styles: [cal_cell_style]
+            pad_all: 2
+            widgets:
+              - label:
+                  id: cal_l8
+                  align: top_mid
+                  text: ""
+                  text_font: montserrat_18
+                  text_color: 0xF2F0EB
+              - obj:
+                  id: cal_dot_8
+                  hidden: true
+                  width: 12
+                  height: 12
+                  radius: 6
+                  bg_color: 0xFBBF24
+                  bg_opa: COVER
+                  border_width: 0
+                  align: bottom_mid
+            on_click:
+              - lambda: 'id(cal_selected_idx) = 8;'
+              - script.execute: cal_open_day
+        - button:
+            id: cal_c9
+            grid_cell_row_pos: 1
+            grid_cell_column_pos: 2
+            grid_cell_x_align: stretch
+            grid_cell_y_align: stretch
+            styles: [cal_cell_style]
+            pad_all: 2
+            widgets:
+              - label:
+                  id: cal_l9
+                  align: top_mid
+                  text: ""
+                  text_font: montserrat_18
+                  text_color: 0xF2F0EB
+              - obj:
+                  id: cal_dot_9
+                  hidden: true
+                  width: 12
+                  height: 12
+                  radius: 6
+                  bg_color: 0xFBBF24
+                  bg_opa: COVER
+                  border_width: 0
+                  align: bottom_mid
+            on_click:
+              - lambda: 'id(cal_selected_idx) = 9;'
+              - script.execute: cal_open_day
+        - button:
+            id: cal_c10
+            grid_cell_row_pos: 1
+            grid_cell_column_pos: 3
+            grid_cell_x_align: stretch
+            grid_cell_y_align: stretch
+            styles: [cal_cell_style]
+            pad_all: 2
+            widgets:
+              - label:
+                  id: cal_l10
+                  align: top_mid
+                  text: ""
+                  text_font: montserrat_18
+                  text_color: 0xF2F0EB
+              - obj:
+                  id: cal_dot_10
+                  hidden: true
+                  width: 12
+                  height: 12
+                  radius: 6
+                  bg_color: 0xFBBF24
+                  bg_opa: COVER
+                  border_width: 0
+                  align: bottom_mid
+            on_click:
+              - lambda: 'id(cal_selected_idx) = 10;'
+              - script.execute: cal_open_day
+        - button:
+            id: cal_c11
+            grid_cell_row_pos: 1
+            grid_cell_column_pos: 4
+            grid_cell_x_align: stretch
+            grid_cell_y_align: stretch
+            styles: [cal_cell_style]
+            pad_all: 2
+            widgets:
+              - label:
+                  id: cal_l11
+                  align: top_mid
+                  text: ""
+                  text_font: montserrat_18
+                  text_color: 0xF2F0EB
+              - obj:
+                  id: cal_dot_11
+                  hidden: true
+                  width: 12
+                  height: 12
+                  radius: 6
+                  bg_color: 0xFBBF24
+                  bg_opa: COVER
+                  border_width: 0
+                  align: bottom_mid
+            on_click:
+              - lambda: 'id(cal_selected_idx) = 11;'
+              - script.execute: cal_open_day
+        - button:
+            id: cal_c12
+            grid_cell_row_pos: 1
+            grid_cell_column_pos: 5
+            grid_cell_x_align: stretch
+            grid_cell_y_align: stretch
+            styles: [cal_cell_style]
+            pad_all: 2
+            widgets:
+              - label:
+                  id: cal_l12
+                  align: top_mid
+                  text: ""
+                  text_font: montserrat_18
+                  text_color: 0xF2F0EB
+              - obj:
+                  id: cal_dot_12
+                  hidden: true
+                  width: 12
+                  height: 12
+                  radius: 6
+                  bg_color: 0xFBBF24
+                  bg_opa: COVER
+                  border_width: 0
+                  align: bottom_mid
+            on_click:
+              - lambda: 'id(cal_selected_idx) = 12;'
+              - script.execute: cal_open_day
+        - button:
+            id: cal_c13
+            grid_cell_row_pos: 1
+            grid_cell_column_pos: 6
+            grid_cell_x_align: stretch
+            grid_cell_y_align: stretch
+            styles: [cal_cell_style]
+            pad_all: 2
+            widgets:
+              - label:
+                  id: cal_l13
+                  align: top_mid
+                  text: ""
+                  text_font: montserrat_18
+                  text_color: 0xF2F0EB
+              - obj:
+                  id: cal_dot_13
+                  hidden: true
+                  width: 12
+                  height: 12
+                  radius: 6
+                  bg_color: 0xFBBF24
+                  bg_opa: COVER
+                  border_width: 0
+                  align: bottom_mid
+            on_click:
+              - lambda: 'id(cal_selected_idx) = 13;'
+              - script.execute: cal_open_day
+        - button:
+            id: cal_c14
+            grid_cell_row_pos: 2
+            grid_cell_column_pos: 0
+            grid_cell_x_align: stretch
+            grid_cell_y_align: stretch
+            styles: [cal_cell_style]
+            pad_all: 2
+            widgets:
+              - label:
+                  id: cal_l14
+                  align: top_mid
+                  text: ""
+                  text_font: montserrat_18
+                  text_color: 0xF2F0EB
+              - obj:
+                  id: cal_dot_14
+                  hidden: true
+                  width: 12
+                  height: 12
+                  radius: 6
+                  bg_color: 0xFBBF24
+                  bg_opa: COVER
+                  border_width: 0
+                  align: bottom_mid
+            on_click:
+              - lambda: 'id(cal_selected_idx) = 14;'
+              - script.execute: cal_open_day
+        - button:
+            id: cal_c15
+            grid_cell_row_pos: 2
+            grid_cell_column_pos: 1
+            grid_cell_x_align: stretch
+            grid_cell_y_align: stretch
+            styles: [cal_cell_style]
+            pad_all: 2
+            widgets:
+              - label:
+                  id: cal_l15
+                  align: top_mid
+                  text: ""
+                  text_font: montserrat_18
+                  text_color: 0xF2F0EB
+              - obj:
+                  id: cal_dot_15
+                  hidden: true
+                  width: 12
+                  height: 12
+                  radius: 6
+                  bg_color: 0xFBBF24
+                  bg_opa: COVER
+                  border_width: 0
+                  align: bottom_mid
+            on_click:
+              - lambda: 'id(cal_selected_idx) = 15;'
+              - script.execute: cal_open_day
+        - button:
+            id: cal_c16
+            grid_cell_row_pos: 2
+            grid_cell_column_pos: 2
+            grid_cell_x_align: stretch
+            grid_cell_y_align: stretch
+            styles: [cal_cell_style]
+            pad_all: 2
+            widgets:
+              - label:
+                  id: cal_l16
+                  align: top_mid
+                  text: ""
+                  text_font: montserrat_18
+                  text_color: 0xF2F0EB
+              - obj:
+                  id: cal_dot_16
+                  hidden: true
+                  width: 12
+                  height: 12
+                  radius: 6
+                  bg_color: 0xFBBF24
+                  bg_opa: COVER
+                  border_width: 0
+                  align: bottom_mid
+            on_click:
+              - lambda: 'id(cal_selected_idx) = 16;'
+              - script.execute: cal_open_day
+        - button:
+            id: cal_c17
+            grid_cell_row_pos: 2
+            grid_cell_column_pos: 3
+            grid_cell_x_align: stretch
+            grid_cell_y_align: stretch
+            styles: [cal_cell_style]
+            pad_all: 2
+            widgets:
+              - label:
+                  id: cal_l17
+                  align: top_mid
+                  text: ""
+                  text_font: montserrat_18
+                  text_color: 0xF2F0EB
+              - obj:
+                  id: cal_dot_17
+                  hidden: true
+                  width: 12
+                  height: 12
+                  radius: 6
+                  bg_color: 0xFBBF24
+                  bg_opa: COVER
+                  border_width: 0
+                  align: bottom_mid
+            on_click:
+              - lambda: 'id(cal_selected_idx) = 17;'
+              - script.execute: cal_open_day
+        - button:
+            id: cal_c18
+            grid_cell_row_pos: 2
+            grid_cell_column_pos: 4
+            grid_cell_x_align: stretch
+            grid_cell_y_align: stretch
+            styles: [cal_cell_style]
+            pad_all: 2
+            widgets:
+              - label:
+                  id: cal_l18
+                  align: top_mid
+                  text: ""
+                  text_font: montserrat_18
+                  text_color: 0xF2F0EB
+              - obj:
+                  id: cal_dot_18
+                  hidden: true
+                  width: 12
+                  height: 12
+                  radius: 6
+                  bg_color: 0xFBBF24
+                  bg_opa: COVER
+                  border_width: 0
+                  align: bottom_mid
+            on_click:
+              - lambda: 'id(cal_selected_idx) = 18;'
+              - script.execute: cal_open_day
+        - button:
+            id: cal_c19
+            grid_cell_row_pos: 2
+            grid_cell_column_pos: 5
+            grid_cell_x_align: stretch
+            grid_cell_y_align: stretch
+            styles: [cal_cell_style]
+            pad_all: 2
+            widgets:
+              - label:
+                  id: cal_l19
+                  align: top_mid
+                  text: ""
+                  text_font: montserrat_18
+                  text_color: 0xF2F0EB
+              - obj:
+                  id: cal_dot_19
+                  hidden: true
+                  width: 12
+                  height: 12
+                  radius: 6
+                  bg_color: 0xFBBF24
+                  bg_opa: COVER
+                  border_width: 0
+                  align: bottom_mid
+            on_click:
+              - lambda: 'id(cal_selected_idx) = 19;'
+              - script.execute: cal_open_day
+        - button:
+            id: cal_c20
+            grid_cell_row_pos: 2
+            grid_cell_column_pos: 6
+            grid_cell_x_align: stretch
+            grid_cell_y_align: stretch
+            styles: [cal_cell_style]
+            pad_all: 2
+            widgets:
+              - label:
+                  id: cal_l20
+                  align: top_mid
+                  text: ""
+                  text_font: montserrat_18
+                  text_color: 0xF2F0EB
+              - obj:
+                  id: cal_dot_20
+                  hidden: true
+                  width: 12
+                  height: 12
+                  radius: 6
+                  bg_color: 0xFBBF24
+                  bg_opa: COVER
+                  border_width: 0
+                  align: bottom_mid
+            on_click:
+              - lambda: 'id(cal_selected_idx) = 20;'
+              - script.execute: cal_open_day
+        - button:
+            id: cal_c21
+            grid_cell_row_pos: 3
+            grid_cell_column_pos: 0
+            grid_cell_x_align: stretch
+            grid_cell_y_align: stretch
+            styles: [cal_cell_style]
+            pad_all: 2
+            widgets:
+              - label:
+                  id: cal_l21
+                  align: top_mid
+                  text: ""
+                  text_font: montserrat_18
+                  text_color: 0xF2F0EB
+              - obj:
+                  id: cal_dot_21
+                  hidden: true
+                  width: 12
+                  height: 12
+                  radius: 6
+                  bg_color: 0xFBBF24
+                  bg_opa: COVER
+                  border_width: 0
+                  align: bottom_mid
+            on_click:
+              - lambda: 'id(cal_selected_idx) = 21;'
+              - script.execute: cal_open_day
+        - button:
+            id: cal_c22
+            grid_cell_row_pos: 3
+            grid_cell_column_pos: 1
+            grid_cell_x_align: stretch
+            grid_cell_y_align: stretch
+            styles: [cal_cell_style]
+            pad_all: 2
+            widgets:
+              - label:
+                  id: cal_l22
+                  align: top_mid
+                  text: ""
+                  text_font: montserrat_18
+                  text_color: 0xF2F0EB
+              - obj:
+                  id: cal_dot_22
+                  hidden: true
+                  width: 12
+                  height: 12
+                  radius: 6
+                  bg_color: 0xFBBF24
+                  bg_opa: COVER
+                  border_width: 0
+                  align: bottom_mid
+            on_click:
+              - lambda: 'id(cal_selected_idx) = 22;'
+              - script.execute: cal_open_day
+        - button:
+            id: cal_c23
+            grid_cell_row_pos: 3
+            grid_cell_column_pos: 2
+            grid_cell_x_align: stretch
+            grid_cell_y_align: stretch
+            styles: [cal_cell_style]
+            pad_all: 2
+            widgets:
+              - label:
+                  id: cal_l23
+                  align: top_mid
+                  text: ""
+                  text_font: montserrat_18
+                  text_color: 0xF2F0EB
+              - obj:
+                  id: cal_dot_23
+                  hidden: true
+                  width: 12
+                  height: 12
+                  radius: 6
+                  bg_color: 0xFBBF24
+                  bg_opa: COVER
+                  border_width: 0
+                  align: bottom_mid
+            on_click:
+              - lambda: 'id(cal_selected_idx) = 23;'
+              - script.execute: cal_open_day
+        - button:
+            id: cal_c24
+            grid_cell_row_pos: 3
+            grid_cell_column_pos: 3
+            grid_cell_x_align: stretch
+            grid_cell_y_align: stretch
+            styles: [cal_cell_style]
+            pad_all: 2
+            widgets:
+              - label:
+                  id: cal_l24
+                  align: top_mid
+                  text: ""
+                  text_font: montserrat_18
+                  text_color: 0xF2F0EB
+              - obj:
+                  id: cal_dot_24
+                  hidden: true
+                  width: 12
+                  height: 12
+                  radius: 6
+                  bg_color: 0xFBBF24
+                  bg_opa: COVER
+                  border_width: 0
+                  align: bottom_mid
+            on_click:
+              - lambda: 'id(cal_selected_idx) = 24;'
+              - script.execute: cal_open_day
+        - button:
+            id: cal_c25
+            grid_cell_row_pos: 3
+            grid_cell_column_pos: 4
+            grid_cell_x_align: stretch
+            grid_cell_y_align: stretch
+            styles: [cal_cell_style]
+            pad_all: 2
+            widgets:
+              - label:
+                  id: cal_l25
+                  align: top_mid
+                  text: ""
+                  text_font: montserrat_18
+                  text_color: 0xF2F0EB
+              - obj:
+                  id: cal_dot_25
+                  hidden: true
+                  width: 12
+                  height: 12
+                  radius: 6
+                  bg_color: 0xFBBF24
+                  bg_opa: COVER
+                  border_width: 0
+                  align: bottom_mid
+            on_click:
+              - lambda: 'id(cal_selected_idx) = 25;'
+              - script.execute: cal_open_day
+        - button:
+            id: cal_c26
+            grid_cell_row_pos: 3
+            grid_cell_column_pos: 5
+            grid_cell_x_align: stretch
+            grid_cell_y_align: stretch
+            styles: [cal_cell_style]
+            pad_all: 2
+            widgets:
+              - label:
+                  id: cal_l26
+                  align: top_mid
+                  text: ""
+                  text_font: montserrat_18
+                  text_color: 0xF2F0EB
+              - obj:
+                  id: cal_dot_26
+                  hidden: true
+                  width: 12
+                  height: 12
+                  radius: 6
+                  bg_color: 0xFBBF24
+                  bg_opa: COVER
+                  border_width: 0
+                  align: bottom_mid
+            on_click:
+              - lambda: 'id(cal_selected_idx) = 26;'
+              - script.execute: cal_open_day
+        - button:
+            id: cal_c27
+            grid_cell_row_pos: 3
+            grid_cell_column_pos: 6
+            grid_cell_x_align: stretch
+            grid_cell_y_align: stretch
+            styles: [cal_cell_style]
+            pad_all: 2
+            widgets:
+              - label:
+                  id: cal_l27
+                  align: top_mid
+                  text: ""
+                  text_font: montserrat_18
+                  text_color: 0xF2F0EB
+              - obj:
+                  id: cal_dot_27
+                  hidden: true
+                  width: 12
+                  height: 12
+                  radius: 6
+                  bg_color: 0xFBBF24
+                  bg_opa: COVER
+                  border_width: 0
+                  align: bottom_mid
+            on_click:
+              - lambda: 'id(cal_selected_idx) = 27;'
+              - script.execute: cal_open_day
+        - button:
+            id: cal_c28
+            grid_cell_row_pos: 4
+            grid_cell_column_pos: 0
+            grid_cell_x_align: stretch
+            grid_cell_y_align: stretch
+            styles: [cal_cell_style]
+            pad_all: 2
+            widgets:
+              - label:
+                  id: cal_l28
+                  align: top_mid
+                  text: ""
+                  text_font: montserrat_18
+                  text_color: 0xF2F0EB
+              - obj:
+                  id: cal_dot_28
+                  hidden: true
+                  width: 12
+                  height: 12
+                  radius: 6
+                  bg_color: 0xFBBF24
+                  bg_opa: COVER
+                  border_width: 0
+                  align: bottom_mid
+            on_click:
+              - lambda: 'id(cal_selected_idx) = 28;'
+              - script.execute: cal_open_day
+        - button:
+            id: cal_c29
+            grid_cell_row_pos: 4
+            grid_cell_column_pos: 1
+            grid_cell_x_align: stretch
+            grid_cell_y_align: stretch
+            styles: [cal_cell_style]
+            pad_all: 2
+            widgets:
+              - label:
+                  id: cal_l29
+                  align: top_mid
+                  text: ""
+                  text_font: montserrat_18
+                  text_color: 0xF2F0EB
+              - obj:
+                  id: cal_dot_29
+                  hidden: true
+                  width: 12
+                  height: 12
+                  radius: 6
+                  bg_color: 0xFBBF24
+                  bg_opa: COVER
+                  border_width: 0
+                  align: bottom_mid
+            on_click:
+              - lambda: 'id(cal_selected_idx) = 29;'
+              - script.execute: cal_open_day
+        - button:
+            id: cal_c30
+            grid_cell_row_pos: 4
+            grid_cell_column_pos: 2
+            grid_cell_x_align: stretch
+            grid_cell_y_align: stretch
+            styles: [cal_cell_style]
+            pad_all: 2
+            widgets:
+              - label:
+                  id: cal_l30
+                  align: top_mid
+                  text: ""
+                  text_font: montserrat_18
+                  text_color: 0xF2F0EB
+              - obj:
+                  id: cal_dot_30
+                  hidden: true
+                  width: 12
+                  height: 12
+                  radius: 6
+                  bg_color: 0xFBBF24
+                  bg_opa: COVER
+                  border_width: 0
+                  align: bottom_mid
+            on_click:
+              - lambda: 'id(cal_selected_idx) = 30;'
+              - script.execute: cal_open_day
+        - button:
+            id: cal_c31
+            grid_cell_row_pos: 4
+            grid_cell_column_pos: 3
+            grid_cell_x_align: stretch
+            grid_cell_y_align: stretch
+            styles: [cal_cell_style]
+            pad_all: 2
+            widgets:
+              - label:
+                  id: cal_l31
+                  align: top_mid
+                  text: ""
+                  text_font: montserrat_18
+                  text_color: 0xF2F0EB
+              - obj:
+                  id: cal_dot_31
+                  hidden: true
+                  width: 12
+                  height: 12
+                  radius: 6
+                  bg_color: 0xFBBF24
+                  bg_opa: COVER
+                  border_width: 0
+                  align: bottom_mid
+            on_click:
+              - lambda: 'id(cal_selected_idx) = 31;'
+              - script.execute: cal_open_day
+        - button:
+            id: cal_c32
+            grid_cell_row_pos: 4
+            grid_cell_column_pos: 4
+            grid_cell_x_align: stretch
+            grid_cell_y_align: stretch
+            styles: [cal_cell_style]
+            pad_all: 2
+            widgets:
+              - label:
+                  id: cal_l32
+                  align: top_mid
+                  text: ""
+                  text_font: montserrat_18
+                  text_color: 0xF2F0EB
+              - obj:
+                  id: cal_dot_32
+                  hidden: true
+                  width: 12
+                  height: 12
+                  radius: 6
+                  bg_color: 0xFBBF24
+                  bg_opa: COVER
+                  border_width: 0
+                  align: bottom_mid
+            on_click:
+              - lambda: 'id(cal_selected_idx) = 32;'
+              - script.execute: cal_open_day
+        - button:
+            id: cal_c33
+            grid_cell_row_pos: 4
+            grid_cell_column_pos: 5
+            grid_cell_x_align: stretch
+            grid_cell_y_align: stretch
+            styles: [cal_cell_style]
+            pad_all: 2
+            widgets:
+              - label:
+                  id: cal_l33
+                  align: top_mid
+                  text: ""
+                  text_font: montserrat_18
+                  text_color: 0xF2F0EB
+              - obj:
+                  id: cal_dot_33
+                  hidden: true
+                  width: 12
+                  height: 12
+                  radius: 6
+                  bg_color: 0xFBBF24
+                  bg_opa: COVER
+                  border_width: 0
+                  align: bottom_mid
+            on_click:
+              - lambda: 'id(cal_selected_idx) = 33;'
+              - script.execute: cal_open_day
+        - button:
+            id: cal_c34
+            grid_cell_row_pos: 4
+            grid_cell_column_pos: 6
+            grid_cell_x_align: stretch
+            grid_cell_y_align: stretch
+            styles: [cal_cell_style]
+            pad_all: 2
+            widgets:
+              - label:
+                  id: cal_l34
+                  align: top_mid
+                  text: ""
+                  text_font: montserrat_18
+                  text_color: 0xF2F0EB
+              - obj:
+                  id: cal_dot_34
+                  hidden: true
+                  width: 12
+                  height: 12
+                  radius: 6
+                  bg_color: 0xFBBF24
+                  bg_opa: COVER
+                  border_width: 0
+                  align: bottom_mid
+            on_click:
+              - lambda: 'id(cal_selected_idx) = 34;'
+              - script.execute: cal_open_day
+
+<<: !include ../common/swipe_navigation.yaml

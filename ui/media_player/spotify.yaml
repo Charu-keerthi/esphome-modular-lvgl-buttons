@@ -1,0 +1,226 @@
+# Spotify "Now Playing" — LOGIC HALF (sensors, scripts, album art, globals).
+#
+# This is the sibling of spotify_page.yaml (the widget tree). Include THIS file
+# via `packages:` and include spotify_page.yaml as a list item inside
+# `lvgl.pages`, positioned where the page should sit in swipe order (package
+# pages always merge BEFORE the including file's own pages, so a package alone
+# could not place the page after music_page). media_player.yaml does both.
+#
+# Required substitutions (defined in the device yaml):
+#   spotify_media_entity   HA entity, e.g. media_player.spotify_charu
+#   ha_base_url            prefix for relative entity_picture URLs
+#   album_placeholder_url  fallback art when nothing is playing
+#
+# Requires the mdi_icons_40 font glyphs: $mdi_home, $mdi_play, $mdi_pause,
+# $mdi_skip_previous, $mdi_skip_next, $mdi_volume_high, $mdi_spotify.
+#
+# Note: the Spotify integration is cloud-polling — position/volume attributes
+# refresh slowly, so a local 1 s tick advances the progress bar between polls
+# (same pattern as media_player.yaml). While idle Spotify only reports
+# supported_features=2048 (select source); transport buttons are no-ops until
+# playback starts from a Spotify client.
+
+globals:
+  - id: sp_elapsed_s
+    type: int
+    restore_value: no
+    initial_value: '0'
+
+  - id: sp_duration_s
+    type: int
+    restore_value: no
+    initial_value: '0'
+
+  - id: sp_volume_pct
+    type: int
+    restore_value: no
+    initial_value: '0'
+
+  - id: sp_is_playing
+    type: bool
+    restore_value: no
+    initial_value: 'false'
+
+online_image:
+  - id: sp_album_art
+    url: ${album_placeholder_url}
+    format: JPEG
+    buffer_size: 65536
+    type: RGB565
+    resize: 200x200
+    update_interval: never
+    on_download_finished:
+      - lvgl.image.update:
+          id: sp_cover_art
+          src: sp_album_art
+
+script:
+  - id: sp_update_media_ui
+    mode: restart
+    then:
+      - lvgl.label.update:
+          id: sp_elapsed_label
+          text: !lambda |-
+            int s = id(sp_elapsed_s);
+            char buf[8];
+            snprintf(buf, sizeof(buf), "%02d:%02d", s / 60, s % 60);
+            return std::string(buf);
+
+      - lvgl.label.update:
+          id: sp_remaining_label
+          text: !lambda |-
+            int remain = id(sp_duration_s) - id(sp_elapsed_s);
+            if (remain < 0) remain = 0;
+            char buf[10];
+            snprintf(buf, sizeof(buf), "-%02d:%02d", remain / 60, remain % 60);
+            return std::string(buf);
+
+      - lvgl.label.update:
+          id: sp_volume_value
+          text: !lambda |-
+            char buf[8];
+            snprintf(buf, sizeof(buf), "%d%%", id(sp_volume_pct));
+            return std::string(buf);
+
+      - lvgl.bar.update:
+          id: sp_progress
+          value: !lambda |-
+            if (id(sp_duration_s) <= 0) return 0;
+            int value = (id(sp_elapsed_s) * 1000) / id(sp_duration_s);
+            if (value < 0) value = 0;
+            if (value > 1000) value = 1000;
+            return value;
+
+interval:
+  - interval: 1s
+    then:
+      - if:
+          condition:
+            lambda: return id(sp_is_playing) && id(sp_duration_s) > 0 && id(sp_elapsed_s) < id(sp_duration_s);
+          then:
+            - lambda: |-
+                id(sp_elapsed_s)++;
+            - script.execute: sp_update_media_ui
+
+text_sensor:
+  - platform: homeassistant
+    id: sp_state
+    entity_id: ${spotify_media_entity}
+    on_value:
+      - lambda: |-
+          id(sp_is_playing) = (x == "playing");
+      - lvgl.label.update:
+          id: sp_state_label
+          text: !lambda |-
+            std::string s = x.empty() ? std::string("idle") : x;
+            for (auto &c : s) c = toupper(c);
+            return s;
+      - lvgl.label.update:
+          id: sp_play_pause_icon
+          text: !lambda |-
+            return x == "playing" ? std::string("$mdi_pause") : std::string("$mdi_play");
+      - if:
+          condition:
+            lambda: return x == "playing";
+          then:
+            - lvgl.widget.update:
+                id: sp_state_badge
+                bg_color: 0x22C55E
+          else:
+            - lvgl.widget.update:
+                id: sp_state_badge
+                bg_color: 0x334155
+
+  - platform: homeassistant
+    id: sp_media_title
+    entity_id: ${spotify_media_entity}
+    attribute: media_title
+    on_value:
+      - lvgl.label.update:
+          id: sp_title_label
+          text: !lambda |-
+            return x.empty() ? std::string("Nothing playing") : x;
+
+  - platform: homeassistant
+    id: sp_media_artist
+    entity_id: ${spotify_media_entity}
+    attribute: media_artist
+    on_value:
+      - lvgl.label.update:
+          id: sp_artist_label
+          text: !lambda |-
+            return x.empty() ? std::string("Unknown artist") : x;
+
+  - platform: homeassistant
+    id: sp_art_url
+    entity_id: ${spotify_media_entity}
+    attribute: entity_picture
+    on_value:
+      - if:
+          condition:
+            lambda: return !x.empty();
+          then:
+            - online_image.set_url:
+                id: sp_album_art
+                url: !lambda |-
+                  if (x.rfind("http://", 0) == 0 || x.rfind("https://", 0) == 0) {
+                    return x;
+                  }
+                  return std::string("${ha_base_url}") + x;
+                update: true
+          else:
+            - online_image.set_url:
+                id: sp_album_art
+                url: ${album_placeholder_url}
+                update: true
+
+  - platform: homeassistant
+    id: sp_position_text
+    entity_id: ${spotify_media_entity}
+    attribute: media_position
+    on_value:
+      - lambda: |-
+          if (x.empty()) {
+            id(sp_elapsed_s) = 0;
+          } else {
+            id(sp_elapsed_s) = (int) atof(x.c_str());
+          }
+          if (id(sp_elapsed_s) < 0) id(sp_elapsed_s) = 0;
+      - script.execute: sp_update_media_ui
+
+  - platform: homeassistant
+    id: sp_duration_text
+    entity_id: ${spotify_media_entity}
+    attribute: media_duration
+    on_value:
+      - lambda: |-
+          if (x.empty()) {
+            id(sp_duration_s) = 0;
+          } else {
+            id(sp_duration_s) = (int) atof(x.c_str());
+          }
+          if (id(sp_duration_s) < 0) id(sp_duration_s) = 0;
+          if (id(sp_elapsed_s) > id(sp_duration_s)) {
+            id(sp_elapsed_s) = id(sp_duration_s);
+          }
+      - script.execute: sp_update_media_ui
+
+  - platform: homeassistant
+    id: sp_volume_text
+    entity_id: ${spotify_media_entity}
+    attribute: volume_level
+    on_value:
+      - lambda: |-
+          if (x.empty()) {
+            id(sp_volume_pct) = 0;
+          } else {
+            id(sp_volume_pct) = (int) (atof(x.c_str()) * 100.0f + 0.5f);
+          }
+          if (id(sp_volume_pct) < 0) id(sp_volume_pct) = 0;
+          if (id(sp_volume_pct) > 100) id(sp_volume_pct) = 100;
+      # Slider is only synced here (not in the 1 s tick) so an in-progress drag
+      # isn't fought every second — Spotify polls slowly, so this is rare anyway.
+      - lvgl.slider.update:
+          id: sp_volume_slider
+          value: !lambda return id(sp_volume_pct);
+      - script.execute: sp_update_media_ui

@@ -1,3 +1,16 @@
+packages:
+  # Music Assistant queue popup (defines popup_queue, mp_fetch_queue, globals).
+  # Requires the device config to also include ui/popup/popup_system.yaml (the
+  # standard device hosts already do) — queue_popup extends its popup_close
+  # script and renders above its popup_scrim. Do NOT include popup_system here
+  # as well, or popup_scrim/scripts would be defined twice.
+  queue_popup: !include ../popup/queue_popup.yaml
+  # Spotify page LOGIC (sensors, scripts, album art). The page widget tree is
+  # included as a list item in lvgl.pages below so it lands right AFTER
+  # music_page in swipe order — package pages always merge before this file's
+  # own pages, so this package could not position the page itself.
+  spotify_logic: !include spotify.yaml
+
 globals:
   - id: media_elapsed_s
     type: int
@@ -152,6 +165,15 @@ text_sensor:
           text: !lambda |-
             return x.empty() ? std::string("Unknown artist") : x;
 
+  # Track the currently-playing media_content_id so the queue popup can
+  # highlight the matching row (queue_popup.yaml reads mp_now_content_id).
+  - platform: homeassistant
+    id: media_content_id
+    entity_id: ${media_player_entity}
+    attribute: media_content_id
+    on_value:
+      - lambda: 'id(mp_now_content_id) = x;'
+
   - platform: homeassistant
     id: media_art_url
     entity_id: ${media_player_entity}
@@ -246,8 +268,6 @@ lvgl:
   buffer_size: 12%
   default_font: montserrat_14
   resume_on_input: true
-  theme:
-    dark_mode: true
 
   pages:
     - id: music_page
@@ -259,7 +279,7 @@ lvgl:
             y: 16
             width: 90
             height: 38
-            styles: [media_button_style]
+            styles: [action_style]
             widgets:
               - label:
                   text_font: mdi_icons_40
@@ -267,6 +287,28 @@ lvgl:
                   text: "$mdi_home"
             on_click:
               - lvgl.page.show: main_page
+
+        # Queue button — top right. Opens the Music Assistant queue popup.
+        # Uses a text label to avoid depending on an MDI glyph being bundled in
+        # the device font; swap to `text_font: mdi_icons_40` + "$mdi_playlist_music"
+        # if that glyph is in your device's font glyph list.
+        - button:
+            align: top_right
+            x: -20
+            y: 16
+            width: 96
+            height: 38
+            styles: [action_style]
+            widgets:
+              - label:
+                  align: center
+                  text: "Queue"
+                  text_font: montserrat_16
+            on_short_click:
+              - script.execute: mp_fetch_queue
+              - lvgl.widget.show: popup_scrim
+              - lvgl.widget.show: popup_queue
+              - script.execute: popup_start_timeout
 
         - label:
             x: 128
@@ -305,6 +347,8 @@ lvgl:
                   x: 0
                   y: 0
                   width: 212
+                  height: 30         # bound to one line so long_mode:dot truncates instead of wrapping
+                  long_mode: dot     # truncate long titles with an ellipsis instead of wrapping
                   text: "Nothing playing"
                   text_font: montserrat_22
 
@@ -313,6 +357,8 @@ lvgl:
                   x: 0
                   y: 52
                   width: 212
+                  height: 26         # bound to one line so long_mode:dot truncates instead of wrapping
+                  long_mode: dot     # truncate long artist names so they don't overrun the State label
                   text: "Unknown artist"
                   text_font: montserrat_18
 
@@ -471,3 +517,8 @@ lvgl:
               - script.execute: media_volume_increase_5
 
       <<: !include ../../common/swipe_navigation.yaml
+
+    # Spotify "Now Playing" page — list item (not a package) so it sits HERE,
+    # immediately after music_page in swipe order. Logic lives in the
+    # spotify_logic package above (spotify.yaml).
+    - !include spotify_page.yaml
