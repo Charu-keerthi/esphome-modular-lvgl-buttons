@@ -1,0 +1,569 @@
+---
+# Hourly forecast popup — companion to forecast.yaml.
+#
+# Tapping a forecast day tile calls hourly_popup_open(day, day_name), which
+# opens popup_hourly with a "Loading..." notice and fetches the hourly
+# forecast from Home Assistant. Met.no serves ~48 hours starting at the
+# current hour, so day 0 naturally begins "now", day 2 is partial and day 3
+# empty ("No hourly forecast available").
+#
+# Requires ui/popup/popup_system.yaml to be included first (scrim z-order).
+#
+# vars:
+#   size: icon size in px (e.g., 40). Must differ from every other weather
+#         include's size in the same device config — the mapping and image
+#         ids are namespaced by it. Include this file only once.
+#   weather_entity: weather entity id (default: weather.home)
+
+mapping:
+  - id: weather_icon_${size}
+    from: string
+    to: image
+    # An unexpected condition string must never yield a null image source.
+    default_value: unknown_${size}
+    entries:
+      clear-night: clear_night_${size}
+      cloudy: cloudy_${size}
+      exceptional: exceptional_${size}
+      fog: fog_${size}
+      hail: hail_${size}
+      lightning: lightning_${size}
+      lightning-rainy: lightning_rainy_${size}
+      partlycloudy: partlycloudy_${size}
+      partlycloudy-night: partlycloudy_${size}
+      pouring: pouring_${size}
+      rainy: rainy_${size}
+      snowy: snowy_${size}
+      snowy-rainy: snowy_rainy_${size}
+      sunny: sunny_${size}
+      windy: windy_${size}
+      windy-variant: windy_${size}
+      unknown: unknown_${size}
+      unavailable: unknown_${size}
+
+globals:
+  # Which forecast day the popup is showing (0..3). The fetch runs in a
+  # separate parameterless script that reads this global — see the WARNING
+  # on hourly_popup_fetch for why it must not be a script parameter.
+  - id: hourly_popup_day
+    type: int
+    restore_value: no
+    initial_value: '0'
+
+script:
+  - id: !extend popup_close
+    then:
+      - lvgl.widget.hide: popup_hourly
+
+  # Open the popup for one forecast day and fetch its hours.
+  # day: 0..3 = the forecast tile index (offset in days from today).
+  # day_name: the tile's day label text ("Sat", "Sun", ...) for the title.
+  - id: hourly_popup_open
+    mode: restart
+    parameters:
+      day: int
+      day_name: string
+    then:
+      - logger.log:
+          level: INFO
+          format: "hourly: open day=%d"
+          args: ['day']
+      - lambda: 'id(hourly_popup_day) = day;'
+      - lvgl.label.update:
+          id: hourly_popup_title
+          text: !lambda 'return day_name + " - Hourly";'
+      - lambda: |-
+          // Reset: hide all rows, show the loading notice, rewind the scroll.
+          lv_obj_t *list = id(hourly_popup_list);
+          for (int i = 0; i < 24; i++) {
+            lv_obj_t *row = lv_obj_get_child(list, i);
+            if (row == nullptr) {
+              ESP_LOGE("hourly", "reset: row %d missing", i);
+              break;
+            }
+            lv_obj_add_flag(row, LV_OBJ_FLAG_HIDDEN);
+          }
+          lv_obj_scroll_to_y(list, 0, LV_ANIM_OFF);
+          lv_label_set_text(id(hourly_popup_notice), "Loading...");
+          lv_obj_clear_flag(id(hourly_popup_notice), LV_OBJ_FLAG_HIDDEN);
+          ESP_LOGI("hourly", "reset done, showing popup");
+      - lvgl.widget.show: popup_scrim
+      - lvgl.widget.show: popup_hourly
+      - script.execute: popup_start_timeout
+      - logger.log:
+          level: INFO
+          format: "hourly: popup shown, fetching forecast"
+      - script.execute: hourly_popup_fetch
+
+  # WARNING: this fetch must stay in a PARAMETERLESS script. ESPHome's
+  # homeassistant.action keeps its response call_id counter as a static
+  # local in the templated play(), i.e. one counter PER PARAMETER-PACK
+  # SPECIALIZATION, and the API server dispatches responses to the first
+  # matching call_id. With script parameters this action would be a
+  # <int,std::string> specialization whose counter also starts at 1,
+  # colliding with the parameterless daily-forecast/calendar actions —
+  # responses then land in the wrong on_success (observed: the daily
+  # forecast handler consumed the hourly response, set conditions to
+  # "null" and crashed in lv_image_set_src). Keeping every
+  # capture_response action parameterless shares one counter → unique ids.
+  - id: hourly_popup_fetch
+    mode: restart
+    then:
+      - homeassistant.action:
+          action: weather.get_forecasts
+          data:
+            type: hourly
+            entity_id: ${weather_entity | default("weather.home")}
+          capture_response: true
+          # LIMITED env + strict=True: only `response` (plus standard HA
+          # template globals) is visible here — the clicked day CANNOT be
+          # passed in. Instead every entry is tagged with its day offset,
+          # computed HA-side in local time, and filtered on-device.
+          response_template: >-
+            {% set fc = response["${weather_entity | default('weather.home')}"].forecast %}
+            {% set today = now().date() %}
+            {% set ns = namespace(items=[]) %}
+            {% for f in fc %}
+            {% set dt = as_datetime(f.datetime) | as_local %}
+            {% set ns.items = ns.items + [{
+              "d": (dt.date() - today).days,
+              "hr": dt.hour,
+              "c": f.condition | default("unknown"),
+              "t": f.temperature | default(0) | round(1),
+              "p": f.precipitation | default(0) | round(1),
+              "w": f.wind_speed | default(0) | round(0) | int}] %}
+            {% endfor %}
+            {{ {"h": ns.items} | tojson }}
+          on_success:
+            # Filters by the hourly_popup_day global. The response holds all
+            # ~48 hours tagged by day offset, so even if the user re-tapped
+            # another tile mid-flight, filtering by the current global shows
+            # the day they most recently chose.
+            - lambda: |-
+                auto hours = response["response"]["h"].as<JsonArrayConst>();
+                ESP_LOGI("hourly", "response received: %u entries, filling day=%d",
+                         (unsigned) hours.size(), id(hourly_popup_day));
+                lv_obj_t *list = id(hourly_popup_list);
+                int shown = 0;
+                char buf[16];
+                // Row children are ordered: time(0) icon(1) temp(2) precip(3) wind(4).
+                for (JsonObjectConst e : hours) {
+                  if (e["d"].as<int>() != id(hourly_popup_day))
+                    continue;
+                  if (shown >= 24)
+                    break;
+                  lv_obj_t *row = lv_obj_get_child(list, shown);
+                  if (row == nullptr || lv_obj_get_child(row, 4) == nullptr) {
+                    ESP_LOGE("hourly", "fill: row %d missing/incomplete", shown);
+                    break;
+                  }
+                  ESP_LOGD("hourly", "fill row %d: %02d:00 %s", shown,
+                           e["hr"].as<int>(), e["c"].as<const char*>());
+                  snprintf(buf, sizeof(buf), "%02d:00", e["hr"].as<int>());
+                  lv_label_set_text(lv_obj_get_child(row, 0), buf);
+                  image::Image *icon = id(weather_icon_${size})[e["c"].as<std::string>()];
+                  if (icon != nullptr) {
+                    lvgl::lv_image_set_src(lv_obj_get_child(row, 1), icon);
+                  } else {
+                    ESP_LOGE("hourly", "fill: no icon for condition '%s'", e["c"].as<const char*>());
+                  }
+                  snprintf(buf, sizeof(buf), "%.1f°", e["t"].as<float>());
+                  lv_label_set_text(lv_obj_get_child(row, 2), buf);
+                  snprintf(buf, sizeof(buf), "%.1f mm", e["p"].as<float>());
+                  lv_label_set_text(lv_obj_get_child(row, 3), buf);
+                  snprintf(buf, sizeof(buf), "%d km/h", e["w"].as<int>());
+                  lv_label_set_text(lv_obj_get_child(row, 4), buf);
+                  lv_obj_clear_flag(row, LV_OBJ_FLAG_HIDDEN);
+                  shown++;
+                }
+                for (int i = shown; i < 24; i++) {
+                  lv_obj_t *row = lv_obj_get_child(list, i);
+                  if (row == nullptr)
+                    break;
+                  lv_obj_add_flag(row, LV_OBJ_FLAG_HIDDEN);
+                }
+                if (shown == 0) {
+                  lv_label_set_text(id(hourly_popup_notice), "No hourly forecast available");
+                } else {
+                  lv_obj_add_flag(id(hourly_popup_notice), LV_OBJ_FLAG_HIDDEN);
+                }
+                lv_obj_scroll_to_y(list, 0, LV_ANIM_OFF);
+                ESP_LOGI("hourly", "fill done: %d rows shown", shown);
+          on_error:
+            - lvgl.label.update:
+                id: hourly_popup_notice
+                text: "Couldn't load hourly forecast"
+            - lvgl.widget.show: hourly_popup_notice
+            - logger.log:
+                level: ERROR
+                format: "weather.get_forecasts hourly failed: %s"
+                args: ['error.c_str()']
+
+# Shared row skeleton. Merged (<<) into each of the 24 list rows below;
+# the on_success lambda relies on every row having exactly these five
+# children in this order.
+.hourly_row_defs:
+  - &hourly_row
+    hidden: true
+    styles: [hourly_row_style]
+    width: 100%
+    height: SIZE_CONTENT
+    scrollable: false
+    layout:
+      type: FLEX
+      flex_flow: ROW
+      flex_align_cross: CENTER
+      pad_column: 4
+  - &hr_time { width: 16%, text_font: nunito_18, text_color: 0xF2F0EB, text: "--:--" }
+  - &hr_temp { width: 15%, text_font: nunito_18, text_color: 0xF2F0EB, text_align: RIGHT, text: "" }
+  - &hr_precip { width: 25%, text_font: nunito_18, text_color: 0xF2F0EB, text_align: RIGHT, text: "" }
+  - &hr_wind { width: 28%, text_font: nunito_18, text_color: 0xF2F0EB, text_align: RIGHT, text: "" }
+
+lvgl:
+  style_definitions:
+    # Same slate palette as popup_calendar / queue_popup.
+    - id: hourly_row_style
+      bg_color: 0x1E293B
+      bg_opa: COVER
+      radius: 10
+      border_width: 0
+      pad_all: 6
+
+  top_layer:
+    widgets:
+      # Hourly-forecast modal. Sibling to popup_scrim (declared first in
+      # popup_system.yaml so the scrim renders beneath this).
+      - obj:
+          id: popup_hourly
+          hidden: true
+          align: CENTER
+          # Near-fullscreen — just a small margin along the screen edges.
+          width: 98%
+          height: 98%
+          radius: 16
+          bg_color: 0x0F172A
+          bg_opa: COVER
+          border_width: 2
+          border_color: 0x334155
+          pad_all: 12
+          # Consume taps inside the popup so they don't fall through to the scrim.
+          clickable: true
+          # Never scroll the popup body itself — otherwise a drag that reaches
+          # the list's edge chains up here and jerks the whole popup content.
+          scrollable: false
+          widgets:
+            - label:
+                id: hourly_popup_title
+                align: top_left
+                text: ""
+                text_font: nunito_24
+                text_color: 0xF2F0EB
+
+            # Close "X" button — top right (same pattern as popup_calendar)
+            - button:
+                align: top_right
+                width: 44
+                height: 44
+                bg_color: 0x334155
+                bg_opa: COVER
+                radius: 12
+                widgets:
+                  - label:
+                      align: center
+                      text: "X"
+                      text_font: nunito_20
+                      text_color: 0xF2F0EB
+                on_click:
+                  - script.execute: popup_close
+
+            # Loading / empty / error notice, centered over the list area.
+            - label:
+                id: hourly_popup_notice
+                hidden: true
+                align: CENTER
+                text: ""
+                text_font: nunito_20
+                text_color: 0xF2F0EB
+
+            # Scrollable column of hourly rows, below the header.
+            - obj:
+                id: hourly_popup_list
+                align: bottom_mid
+                width: 100%
+                height: 84%
+                bg_opa: TRANSP
+                border_width: 0
+                pad_all: 0
+                pad_right: 6          # room for the scrollbar
+                scrollable: true
+                # Hard-stop at the edges: the rubber-band overshoot reads as a
+                # sudden speed-up when a fling reaches the end of the list.
+                scroll_elastic: false
+                scrollbar_mode: AUTO
+                layout:
+                  type: FLEX
+                  flex_flow: COLUMN
+                  pad_row: 4
+                widgets:
+                  - obj:
+                      <<: *hourly_row
+                      widgets:
+                        - label: { <<: *hr_time }
+                        - image: { src: "unknown_${size}" }
+                        - label: { <<: *hr_temp }
+                        - label: { <<: *hr_precip }
+                        - label: { <<: *hr_wind }
+                  - obj:
+                      <<: *hourly_row
+                      widgets:
+                        - label: { <<: *hr_time }
+                        - image: { src: "unknown_${size}" }
+                        - label: { <<: *hr_temp }
+                        - label: { <<: *hr_precip }
+                        - label: { <<: *hr_wind }
+                  - obj:
+                      <<: *hourly_row
+                      widgets:
+                        - label: { <<: *hr_time }
+                        - image: { src: "unknown_${size}" }
+                        - label: { <<: *hr_temp }
+                        - label: { <<: *hr_precip }
+                        - label: { <<: *hr_wind }
+                  - obj:
+                      <<: *hourly_row
+                      widgets:
+                        - label: { <<: *hr_time }
+                        - image: { src: "unknown_${size}" }
+                        - label: { <<: *hr_temp }
+                        - label: { <<: *hr_precip }
+                        - label: { <<: *hr_wind }
+                  - obj:
+                      <<: *hourly_row
+                      widgets:
+                        - label: { <<: *hr_time }
+                        - image: { src: "unknown_${size}" }
+                        - label: { <<: *hr_temp }
+                        - label: { <<: *hr_precip }
+                        - label: { <<: *hr_wind }
+                  - obj:
+                      <<: *hourly_row
+                      widgets:
+                        - label: { <<: *hr_time }
+                        - image: { src: "unknown_${size}" }
+                        - label: { <<: *hr_temp }
+                        - label: { <<: *hr_precip }
+                        - label: { <<: *hr_wind }
+                  - obj:
+                      <<: *hourly_row
+                      widgets:
+                        - label: { <<: *hr_time }
+                        - image: { src: "unknown_${size}" }
+                        - label: { <<: *hr_temp }
+                        - label: { <<: *hr_precip }
+                        - label: { <<: *hr_wind }
+                  - obj:
+                      <<: *hourly_row
+                      widgets:
+                        - label: { <<: *hr_time }
+                        - image: { src: "unknown_${size}" }
+                        - label: { <<: *hr_temp }
+                        - label: { <<: *hr_precip }
+                        - label: { <<: *hr_wind }
+                  - obj:
+                      <<: *hourly_row
+                      widgets:
+                        - label: { <<: *hr_time }
+                        - image: { src: "unknown_${size}" }
+                        - label: { <<: *hr_temp }
+                        - label: { <<: *hr_precip }
+                        - label: { <<: *hr_wind }
+                  - obj:
+                      <<: *hourly_row
+                      widgets:
+                        - label: { <<: *hr_time }
+                        - image: { src: "unknown_${size}" }
+                        - label: { <<: *hr_temp }
+                        - label: { <<: *hr_precip }
+                        - label: { <<: *hr_wind }
+                  - obj:
+                      <<: *hourly_row
+                      widgets:
+                        - label: { <<: *hr_time }
+                        - image: { src: "unknown_${size}" }
+                        - label: { <<: *hr_temp }
+                        - label: { <<: *hr_precip }
+                        - label: { <<: *hr_wind }
+                  - obj:
+                      <<: *hourly_row
+                      widgets:
+                        - label: { <<: *hr_time }
+                        - image: { src: "unknown_${size}" }
+                        - label: { <<: *hr_temp }
+                        - label: { <<: *hr_precip }
+                        - label: { <<: *hr_wind }
+                  - obj:
+                      <<: *hourly_row
+                      widgets:
+                        - label: { <<: *hr_time }
+                        - image: { src: "unknown_${size}" }
+                        - label: { <<: *hr_temp }
+                        - label: { <<: *hr_precip }
+                        - label: { <<: *hr_wind }
+                  - obj:
+                      <<: *hourly_row
+                      widgets:
+                        - label: { <<: *hr_time }
+                        - image: { src: "unknown_${size}" }
+                        - label: { <<: *hr_temp }
+                        - label: { <<: *hr_precip }
+                        - label: { <<: *hr_wind }
+                  - obj:
+                      <<: *hourly_row
+                      widgets:
+                        - label: { <<: *hr_time }
+                        - image: { src: "unknown_${size}" }
+                        - label: { <<: *hr_temp }
+                        - label: { <<: *hr_precip }
+                        - label: { <<: *hr_wind }
+                  - obj:
+                      <<: *hourly_row
+                      widgets:
+                        - label: { <<: *hr_time }
+                        - image: { src: "unknown_${size}" }
+                        - label: { <<: *hr_temp }
+                        - label: { <<: *hr_precip }
+                        - label: { <<: *hr_wind }
+                  - obj:
+                      <<: *hourly_row
+                      widgets:
+                        - label: { <<: *hr_time }
+                        - image: { src: "unknown_${size}" }
+                        - label: { <<: *hr_temp }
+                        - label: { <<: *hr_precip }
+                        - label: { <<: *hr_wind }
+                  - obj:
+                      <<: *hourly_row
+                      widgets:
+                        - label: { <<: *hr_time }
+                        - image: { src: "unknown_${size}" }
+                        - label: { <<: *hr_temp }
+                        - label: { <<: *hr_precip }
+                        - label: { <<: *hr_wind }
+                  - obj:
+                      <<: *hourly_row
+                      widgets:
+                        - label: { <<: *hr_time }
+                        - image: { src: "unknown_${size}" }
+                        - label: { <<: *hr_temp }
+                        - label: { <<: *hr_precip }
+                        - label: { <<: *hr_wind }
+                  - obj:
+                      <<: *hourly_row
+                      widgets:
+                        - label: { <<: *hr_time }
+                        - image: { src: "unknown_${size}" }
+                        - label: { <<: *hr_temp }
+                        - label: { <<: *hr_precip }
+                        - label: { <<: *hr_wind }
+                  - obj:
+                      <<: *hourly_row
+                      widgets:
+                        - label: { <<: *hr_time }
+                        - image: { src: "unknown_${size}" }
+                        - label: { <<: *hr_temp }
+                        - label: { <<: *hr_precip }
+                        - label: { <<: *hr_wind }
+                  - obj:
+                      <<: *hourly_row
+                      widgets:
+                        - label: { <<: *hr_time }
+                        - image: { src: "unknown_${size}" }
+                        - label: { <<: *hr_temp }
+                        - label: { <<: *hr_precip }
+                        - label: { <<: *hr_wind }
+                  - obj:
+                      <<: *hourly_row
+                      widgets:
+                        - label: { <<: *hr_time }
+                        - image: { src: "unknown_${size}" }
+                        - label: { <<: *hr_temp }
+                        - label: { <<: *hr_precip }
+                        - label: { <<: *hr_wind }
+                  - obj:
+                      <<: *hourly_row
+                      widgets:
+                        - label: { <<: *hr_time }
+                        - image: { src: "unknown_${size}" }
+                        - label: { <<: *hr_temp }
+                        - label: { <<: *hr_precip }
+                        - label: { <<: *hr_wind }
+
+# Weather icons — same SVG artwork as forecast.yaml, resized to ${size}.
+# https://github.com/manifestinteractive/weather-underground-icons
+
+image:
+  rgb565:
+    alpha_channel:
+      - file: esphome-modular-lvgl-buttons/ui/weather/assets/images/nt_clear.svg
+        id: clear_night_${size}
+        resize: ${size}x${size}
+
+      - file: esphome-modular-lvgl-buttons/ui/weather/assets/images/cloudy.svg
+        id: cloudy_${size}
+        resize: ${size}x${size}
+
+      - file: esphome-modular-lvgl-buttons/ui/weather/assets/images/tstorms.svg
+        id: exceptional_${size}
+        resize: ${size}x${size}
+
+      - file: esphome-modular-lvgl-buttons/ui/weather/assets/images/fog.svg
+        id: fog_${size}
+        resize: ${size}x${size}
+
+      - file: esphome-modular-lvgl-buttons/ui/weather/assets/images/sleet.svg
+        id: hail_${size}
+        resize: ${size}x${size}
+
+      - file: esphome-modular-lvgl-buttons/ui/weather/assets/images/chancetstorms.svg
+        id: lightning_${size}
+        resize: ${size}x${size}
+
+      - file: esphome-modular-lvgl-buttons/ui/weather/assets/images/tstorms.svg
+        id: lightning_rainy_${size}
+        resize: ${size}x${size}
+
+      - file: esphome-modular-lvgl-buttons/ui/weather/assets/images/partlycloudy.svg
+        id: partlycloudy_${size}
+        resize: ${size}x${size}
+
+      - file: esphome-modular-lvgl-buttons/ui/weather/assets/images/rain.svg
+        id: pouring_${size}
+        resize: ${size}x${size}
+
+      - file: esphome-modular-lvgl-buttons/ui/weather/assets/images/chancerain.svg
+        id: rainy_${size}
+        resize: ${size}x${size}
+
+      - file: esphome-modular-lvgl-buttons/ui/weather/assets/images/snow.svg
+        id: snowy_${size}
+        resize: ${size}x${size}
+
+      - file: esphome-modular-lvgl-buttons/ui/weather/assets/images/chancesleet.svg
+        id: snowy_rainy_${size}
+        resize: ${size}x${size}
+
+      - file: esphome-modular-lvgl-buttons/ui/weather/assets/images/sunny.svg
+        id: sunny_${size}
+        resize: ${size}x${size}
+
+      - file: esphome-modular-lvgl-buttons/ui/weather/assets/images/windy.svg
+        id: windy_${size}
+        resize: ${size}x${size}
+
+      - file: esphome-modular-lvgl-buttons/ui/weather/assets/images/unknown.svg
+        id: unknown_${size}
+        resize: ${size}x${size}
+
+      - file: esphome-modular-lvgl-buttons/ui/weather/assets/images/circle-slash.svg
+        id: unavailable_${size}
+        resize: ${size}x${size}

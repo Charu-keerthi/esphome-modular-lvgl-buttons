@@ -10,6 +10,9 @@ mapping:
   - id: weather_icon_${size}
     from: string
     to: image
+    # A missing key must fall back to the "unknown" icon — without a default
+    # the mapping returns nullptr and lv_image_set_src crashes the device.
+    default_value: unknown_${size}
     entries:
       clear-night: clear_night_${size}
       cloudy: cloudy_${size}
