@@ -10,9 +10,12 @@
 # 0x334155 (media_button_style), green 0x22C55E progress/accents. Those shared
 # styles are defined in media_player.yaml and are global after package merge.
 #
-# NOTE: no queue button here (unlike music_page) — the HA Spotify integration
-# exposes no queue-retrieval action; mass_queue/music_assistant services only
-# work with Music Assistant media_player entities.
+# Queue button (top-mid) opens popup_spotify_queue, which fetches
+# https://api.spotify.com/v1/me/player/queue directly via http_request — NOT
+# through Home Assistant (HA's Spotify integration exposes no queue-retrieval
+# service; only mass_queue/music_assistant services exist, and those only
+# work with Music Assistant media_player entities). See
+# ui/popup/spotify_queue_popup.yaml.
 #
 # Widget ids consumed by spotify.yaml:
 #   sp_cover_art         album art image
@@ -45,6 +48,24 @@ widgets:
             text: "$mdi_home"
       on_click:
         - lvgl.page.show: main_page
+
+  # ── Queue button: top-mid, opens popup_spotify_queue ──
+  - button:
+      align: top_mid
+      y: 16
+      width: 90
+      height: 38
+      styles: [action_style]
+      widgets:
+        - label:
+            text_font: mdi_icons_40
+            align: center
+            text: "$mdi_playlist_music"
+      on_click:
+        - script.execute: sp_fetch_queue
+        - lvgl.widget.show: popup_scrim
+        - lvgl.widget.show: popup_spotify_queue
+        - script.execute: popup_start_timeout
 
   # Spotify logo — top right, brand green
   - label:

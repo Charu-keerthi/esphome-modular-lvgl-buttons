@@ -1,0 +1,518 @@
+---
+# Spotify "Up Next" popup — read-only queue viewer for the Spotify Now Playing
+# page. Unlike ui/popup/queue_popup.yaml (Music Assistant), this fetches
+# directly from the Spotify Web API via http_request — NOT through Home
+# Assistant (HA's Spotify integration exposes no queue-retrieval service).
+#
+# Rows are plain `obj` (not `button`): Spotify's queue endpoint has no
+# "jump to this item" call, only sequential skip-next, so rows are
+# intentionally non-interactive (no clickable:true, no on_click).
+#
+# Requires (supplied by the including device config):
+#   ${spotify_basic_auth}     - base64("client_id:client_secret") (see secrets.yaml)
+#   ${spotify_refresh_token}  - long-lived Spotify OAuth refresh token (see secrets.yaml)
+#   http_request:             - must be declared once, globally (already is,
+#                               in media_player_example.yaml) — do NOT redeclare here
+#   popup_system.yaml         - must be included BEFORE this file (scrim z-order)
+#   popup_timeout_seconds     - substitution consumed by popup_system.yaml
+#
+# Required Spotify OAuth scopes on the refresh token: user-read-currently-playing,
+# user-read-playback-state.
+#
+# Two-step fetch, every time the popup opens (no caching — kept deliberately
+# simple, the cost is one extra small HTTPS round trip per button tap):
+#   1. sp_fetch_queue    POSTs to Spotify's token endpoint with the refresh
+#                        token to mint a fresh 1-hour access token (stored in
+#                        the sp_access_token global). This is what makes the
+#                        popup work indefinitely instead of needing a manually
+#                        pasted access token replaced every hour — only the
+#                        refresh token needs replacing, and that's valid for
+#                        ~180 days under Spotify's current policy.
+#   2. sp_fetch_queue_data  GETs the actual queue using that access token.
+# On any failure the popup shows an on-device message (distinguishing a dead
+# refresh token from a transient error) instead of failing silently.
+#
+# To open (from the page):
+#   - script.execute: sp_fetch_queue
+#   - lvgl.widget.show: popup_scrim
+#   - lvgl.widget.show: popup_spotify_queue
+#   - script.execute: popup_start_timeout
+
+globals:
+  # Access token minted by sp_fetch_queue, consumed by sp_fetch_queue_data.
+  # RAM-only (not persisted) — re-minted fresh on every popup open, so there's
+  # no expiry timestamp to track.
+  - id: sp_access_token
+    type: std::string
+    restore_value: no
+    initial_value: '""'
+
+  # Pre-built "Bearer <token>" string, kept in sync with sp_access_token.
+  # request_headers lambdas must return const char*, not std::string — a
+  # temporary std::string's c_str() would dangle once the lambda returns, so
+  # this has to live in a persistent global instead of being built inline.
+  - id: sp_auth_header
+    type: std::string
+    restore_value: no
+    initial_value: '""'
+
+script:
+  # Register with the shared close script so tap-outside / timeout also hides us.
+  - id: !extend popup_close
+    then:
+      - lvgl.widget.hide: popup_spotify_queue
+
+  # Step 1: mint a fresh access token from the refresh token, then (on
+  # success) hand off to sp_fetch_queue_data.
+  - id: sp_fetch_queue
+    then:
+      # Start clean: clear any previous error banner, show the rows container
+      # (it may have been hidden by a prior error), and clear any stale access
+      # token so a failed refresh can never fall through to reusing an old one.
+      - lvgl.widget.hide: sp_queue_status
+      - lvgl.widget.show: sp_queue_rows
+      - lambda: |-
+          id(sp_access_token) = "";
+          id(sp_auth_header) = "";
+      - logger.log:
+          level: INFO
+          format: "Refreshing Spotify access token..."
+      - http_request.post:
+          url: "https://accounts.spotify.com/api/token"
+          request_headers:
+            Authorization: "Basic ${spotify_basic_auth}"
+            Content-Type: "application/x-www-form-urlencoded"
+          body: "grant_type=refresh_token&refresh_token=${spotify_refresh_token}"
+          capture_response: true
+          max_response_buffer_size: 2048
+          on_response:
+            then:
+              - lambda: |-
+                  auto show_error = [&](const char* msg) {
+                    lv_obj_add_flag(id(sp_queue_rows), LV_OBJ_FLAG_HIDDEN);
+                    lv_label_set_text(id(sp_queue_status), msg);
+                    lv_obj_clear_flag(id(sp_queue_status), LV_OBJ_FLAG_HIDDEN);
+                  };
+
+                  if (response->status_code == 400 || response->status_code == 401) {
+                    ESP_LOGE("sp_queue", "Token refresh failed (HTTP %d) - refresh token likely expired/revoked", response->status_code);
+                    show_error("Spotify refresh token expired or invalid.\nGet a new one and update secrets.yaml.");
+                    return;
+                  }
+                  if (response->status_code != 200) {
+                    ESP_LOGE("sp_queue", "Token refresh returned HTTP %d", response->status_code);
+                    char buf[48];
+                    snprintf(buf, sizeof(buf), "Spotify auth error (HTTP %d).", response->status_code);
+                    show_error(buf);
+                    return;
+                  }
+                  if (body.length() == 0) {
+                    ESP_LOGE("sp_queue", "Empty response from token endpoint");
+                    show_error("Spotify: empty auth response.");
+                    return;
+                  }
+
+                  bool ok = json::parse_json(body, [](JsonObject root) -> bool {
+                    const char* token = root["access_token"] | "";
+                    if (token[0] == '\0') return false;
+                    id(sp_access_token) = token;
+                    id(sp_auth_header) = std::string("Bearer ") + token;
+                    return true;
+                  });
+
+                  if (!ok) {
+                    ESP_LOGE("sp_queue", "Token refresh response missing access_token");
+                    show_error("Spotify: could not refresh access token.");
+                    return;
+                  }
+                  ESP_LOGD("sp_queue", "Spotify access token refreshed");
+              - if:
+                  condition:
+                    lambda: 'return !id(sp_access_token).empty();'
+                  then:
+                    # Deliberate delay before the second request: without it,
+                    # this whole call chain executes synchronously inside the
+                    # token request's on_response handler, which keeps that
+                    # request's HttpContainer (response body, TLS/connection
+                    # state) alive on the stack for the entire duration of the
+                    # queue fetch below - compounding memory pressure on top of
+                    # WiFi/TLS/LVGL and contributing to the reserve() crashes
+                    # seen even at a 64KB buffer. The delay lets this handler
+                    # return first, releasing that container, before the
+                    # second http_request starts from a clean call stack.
+                    - delay: 200ms
+                    - script.execute: sp_fetch_queue_data
+          on_error:
+            then:
+              - lambda: |-
+                  ESP_LOGE("sp_queue", "Spotify token refresh request failed (network error)");
+                  lv_obj_add_flag(id(sp_queue_rows), LV_OBJ_FLAG_HIDDEN);
+                  lv_label_set_text(id(sp_queue_status), "Network error - check WiFi.");
+                  lv_obj_clear_flag(id(sp_queue_status), LV_OBJ_FLAG_HIDDEN);
+
+  # Step 2: fetch the queue itself using the access token sp_fetch_queue just minted.
+  - id: sp_fetch_queue_data
+    then:
+      - http_request.get:
+          url: "https://api.spotify.com/v1/me/player/queue"
+          request_headers:
+            Authorization: !lambda |-
+              return id(sp_auth_header).c_str();
+          # NO capture_response / max_response_buffer_size here on purpose. See
+          # the block comment below the on_response lambda for why: the real
+          # response body (~55KB, confirmed via content-length) never reliably
+          # fit in one contiguous internal-SRAM block on this device (128KB and
+          # 64KB buffered attempts both crashed with reserve()/bad_alloc, even
+          # with 100+KB of TOTAL free heap - the heap was just fragmented into
+          # pieces smaller than the response). Streaming past that problem
+          # entirely instead of trying to size around it.
+          on_response:
+            then:
+              - lambda: |-
+                  lv_obj_t* rows[10] = {
+                    id(sp_queue_row_0), id(sp_queue_row_1), id(sp_queue_row_2), id(sp_queue_row_3),
+                    id(sp_queue_row_4), id(sp_queue_row_5), id(sp_queue_row_6), id(sp_queue_row_7),
+                    id(sp_queue_row_8), id(sp_queue_row_9) };
+                  lv_obj_t* lbls[10] = {
+                    id(sp_queue_label_0), id(sp_queue_label_1), id(sp_queue_label_2), id(sp_queue_label_3),
+                    id(sp_queue_label_4), id(sp_queue_label_5), id(sp_queue_label_6), id(sp_queue_label_7),
+                    id(sp_queue_label_8), id(sp_queue_label_9) };
+
+                  auto show_error = [&](const char* msg) {
+                    lv_obj_add_flag(id(sp_queue_rows), LV_OBJ_FLAG_HIDDEN);
+                    lv_label_set_text(id(sp_queue_status), msg);
+                    lv_obj_clear_flag(id(sp_queue_status), LV_OBJ_FLAG_HIDDEN);
+                  };
+
+                  if (response->status_code == 401) {
+                    ESP_LOGE("sp_queue", "401 Unauthorized on queue fetch despite a fresh access token");
+                    show_error("Spotify rejected the access token.\nCheck the refresh token's scopes.");
+                    return;
+                  }
+                  if (response->status_code == 403) {
+                    ESP_LOGE("sp_queue", "403 Forbidden - check token scopes");
+                    show_error("Spotify: access denied.\nCheck the refresh token's scopes.");
+                    return;
+                  }
+                  if (response->status_code == 429) {
+                    ESP_LOGE("sp_queue", "429 Rate limited");
+                    show_error("Spotify: rate limited.\nTry again shortly.");
+                    return;
+                  }
+                  if (response->status_code != 200) {
+                    ESP_LOGE("sp_queue", "Unexpected HTTP %d", response->status_code);
+                    char ebuf[48];
+                    snprintf(ebuf, sizeof(ebuf), "Spotify error (HTTP %d).", response->status_code);
+                    show_error(ebuf);
+                    return;
+                  }
+
+                  // Stream-parse straight from the connection in small fixed
+                  // chunks instead of buffering the whole ~55KB body. A
+                  // Filter tells ArduinoJson to only materialize
+                  // queue[].name and queue[].artists[0].name as it parses -
+                  // everything else (album art, available_markets, ids,
+                  // urls, ...) is skipped without ever being allocated, so
+                  // the resulting JsonDocument stays tiny (a few small
+                  // allocations) no matter how large the real response is.
+                  struct ContainerReader {
+                    std::shared_ptr<esphome::http_request::HttpContainer> container;
+                    uint8_t buf[256];
+                    size_t buf_len = 0;
+                    size_t buf_pos = 0;
+
+                    int read() {
+                      while (buf_pos >= buf_len) {
+                        int n = container->read(buf, sizeof(buf));
+                        if (n > 0) {
+                          buf_len = (size_t) n;
+                          buf_pos = 0;
+                        } else if (container->is_read_complete() || n < 0) {
+                          return -1;
+                        }
+                        // n == 0 and not complete: no data yet, keep waiting.
+                      }
+                      return buf[buf_pos++];
+                    }
+
+                    size_t readBytes(char *out, size_t len) {
+                      size_t n = 0;
+                      while (n < len) {
+                        int c = read();
+                        if (c < 0) break;
+                        out[n++] = (char) c;
+                      }
+                      return n;
+                    }
+                  };
+
+                  ContainerReader reader{response};
+
+                  JsonDocument filter;
+                  filter["queue"][0]["name"] = true;
+                  filter["queue"][0]["artists"][0]["name"] = true;
+
+                  JsonDocument doc;
+                  DeserializationError err =
+                      deserializeJson(doc, reader, DeserializationOption::Filter(filter));
+
+                  if (err) {
+                    ESP_LOGE("sp_queue", "Queue JSON parse failed: %s", err.c_str());
+                    show_error("Spotify: could not read queue.");
+                    return;
+                  }
+                  if (!doc["queue"].is<JsonArray>()) {
+                    ESP_LOGE("sp_queue", "Response missing 'queue' array");
+                    show_error("Spotify: could not read queue.");
+                    return;
+                  }
+
+                  JsonArray queue = doc["queue"];
+                  int i = 0;
+                  for (JsonObject item : queue) {
+                    if (i >= 10) break;
+                    const char* name = item["name"] | "";
+                    const char* artist = item["artists"][0]["name"] | "";
+                    std::string label = name;
+                    if (artist[0] != '\0') {
+                      label += " - ";
+                      label += artist;
+                    }
+                    lv_label_set_text(lbls[i], label.c_str());
+                    lv_obj_clear_flag(rows[i], LV_OBJ_FLAG_HIDDEN);
+                    i++;
+                  }
+                  // Hide any leftover row slots (queue had fewer than 10 items).
+                  for (; i < 10; i++) {
+                    lv_obj_add_flag(rows[i], LV_OBJ_FLAG_HIDDEN);
+                  }
+          on_error:
+            then:
+              - lambda: |-
+                  ESP_LOGE("sp_queue", "Spotify queue request failed (network error)");
+                  lv_obj_add_flag(id(sp_queue_rows), LV_OBJ_FLAG_HIDDEN);
+                  lv_label_set_text(id(sp_queue_status), "Network error - check WiFi.");
+                  lv_obj_clear_flag(id(sp_queue_status), LV_OBJ_FLAG_HIDDEN);
+
+lvgl:
+  top_layer:
+    widgets:
+      - obj:
+          id: popup_spotify_queue
+          hidden: true
+          align: CENTER
+          width: 95%
+          height: 95%
+          radius: 16
+          bg_color: 0x0F172A
+          bg_opa: COVER
+          border_width: 2
+          border_color: 0x334155
+          pad_all: 12
+          clickable: true
+          widgets:
+            - label:
+                align: top_left
+                text: "Up Next"
+                text_font: montserrat_22
+                text_color: 0xF2F0EB
+
+            - button:
+                align: top_right
+                width: 44
+                height: 44
+                bg_color: 0x334155
+                bg_opa: COVER
+                radius: 12
+                widgets:
+                  - label:
+                      align: center
+                      text: "X"
+                      text_font: montserrat_22
+                      text_color: 0xF2F0EB
+                on_click:
+                  - script.execute: popup_close
+
+            # Error / status banner — hidden by default, shown in place of the
+            # rows on 401/403/429/other-error/network-error so a stale token
+            # is obvious on-device without checking logs. Mutually exclusive
+            # with sp_queue_rows (only one is visible at a time), so their
+            # overlapping y-position never causes a visual conflict.
+            - label:
+                id: sp_queue_status
+                hidden: true
+                align: top_mid
+                y: 52
+                width: 92%
+                long_mode: WRAP
+                text_align: center
+                text: ""
+                text_font: montserrat_16
+                text_color: 0xF59E0B
+
+            - obj:
+                id: sp_queue_rows
+                align: bottom_mid
+                width: 100%
+                height: 88%
+                bg_opa: TRANSP
+                border_width: 0
+                pad_all: 0
+                pad_right: 6
+                scrollable: true
+                scrollbar_mode: AUTO
+                layout:
+                  type: FLEX
+                  flex_flow: COLUMN
+                  pad_row: 6
+                widgets:
+                  - obj:
+                      id: sp_queue_row_0
+                      hidden: true
+                      styles: [queue_row_style]
+                      width: 100%
+                      height: 76
+                      widgets:
+                        - label:
+                            id: sp_queue_label_0
+                            align: left_mid
+                            width: 100%
+                            height: 56
+                            long_mode: dot
+                            text: ""
+                            text_color: 0xF2F0EB
+                  - obj:
+                      id: sp_queue_row_1
+                      hidden: true
+                      styles: [queue_row_style]
+                      width: 100%
+                      height: 76
+                      widgets:
+                        - label:
+                            id: sp_queue_label_1
+                            align: left_mid
+                            width: 100%
+                            height: 56
+                            long_mode: dot
+                            text: ""
+                            text_color: 0xF2F0EB
+                  - obj:
+                      id: sp_queue_row_2
+                      hidden: true
+                      styles: [queue_row_style]
+                      width: 100%
+                      height: 76
+                      widgets:
+                        - label:
+                            id: sp_queue_label_2
+                            align: left_mid
+                            width: 100%
+                            height: 56
+                            long_mode: dot
+                            text: ""
+                            text_color: 0xF2F0EB
+                  - obj:
+                      id: sp_queue_row_3
+                      hidden: true
+                      styles: [queue_row_style]
+                      width: 100%
+                      height: 76
+                      widgets:
+                        - label:
+                            id: sp_queue_label_3
+                            align: left_mid
+                            width: 100%
+                            height: 56
+                            long_mode: dot
+                            text: ""
+                            text_color: 0xF2F0EB
+                  - obj:
+                      id: sp_queue_row_4
+                      hidden: true
+                      styles: [queue_row_style]
+                      width: 100%
+                      height: 76
+                      widgets:
+                        - label:
+                            id: sp_queue_label_4
+                            align: left_mid
+                            width: 100%
+                            height: 56
+                            long_mode: dot
+                            text: ""
+                            text_color: 0xF2F0EB
+                  - obj:
+                      id: sp_queue_row_5
+                      hidden: true
+                      styles: [queue_row_style]
+                      width: 100%
+                      height: 76
+                      widgets:
+                        - label:
+                            id: sp_queue_label_5
+                            align: left_mid
+                            width: 100%
+                            height: 56
+                            long_mode: dot
+                            text: ""
+                            text_color: 0xF2F0EB
+                  - obj:
+                      id: sp_queue_row_6
+                      hidden: true
+                      styles: [queue_row_style]
+                      width: 100%
+                      height: 76
+                      widgets:
+                        - label:
+                            id: sp_queue_label_6
+                            align: left_mid
+                            width: 100%
+                            height: 56
+                            long_mode: dot
+                            text: ""
+                            text_color: 0xF2F0EB
+                  - obj:
+                      id: sp_queue_row_7
+                      hidden: true
+                      styles: [queue_row_style]
+                      width: 100%
+                      height: 76
+                      widgets:
+                        - label:
+                            id: sp_queue_label_7
+                            align: left_mid
+                            width: 100%
+                            height: 56
+                            long_mode: dot
+                            text: ""
+                            text_color: 0xF2F0EB
+                  - obj:
+                      id: sp_queue_row_8
+                      hidden: true
+                      styles: [queue_row_style]
+                      width: 100%
+                      height: 76
+                      widgets:
+                        - label:
+                            id: sp_queue_label_8
+                            align: left_mid
+                            width: 100%
+                            height: 56
+                            long_mode: dot
+                            text: ""
+                            text_color: 0xF2F0EB
+                  - obj:
+                      id: sp_queue_row_9
+                      hidden: true
+                      styles: [queue_row_style]
+                      width: 100%
+                      height: 76
+                      widgets:
+                        - label:
+                            id: sp_queue_label_9
+                            align: left_mid
+                            width: 100%
+                            height: 56
+                            long_mode: dot
+                            text: ""
+                            text_color: 0xF2F0EB
