@@ -338,6 +338,17 @@ lvgl:
                         data:
                           entity_id: ${apple_tv_remote_entity}
                           command: home
+                  # Hold = pyatv's "home_hold", which is what the physical Siri
+                  # Remote sends when you press-and-hold TV/Home — it opens
+                  # Control Center (the quick-settings bar, top-right of the
+                  # screen), not another trip to the Home Screen.
+                  on_long_press:
+                    - homeassistant.service:
+                        service: remote.send_command
+                        data:
+                          entity_id: ${apple_tv_remote_entity}
+                          command: home
+                          hold_secs: "1"
 
               - button:
                   flex_grow: 1
