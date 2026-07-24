@@ -10,6 +10,11 @@ packages:
   # music_page in swipe order — package pages always merge before this file's
   # own pages, so this package could not position the page itself.
   spotify_logic: !include spotify.yaml
+  # Spotify "Up Next" popup (read-only, fetched directly from Spotify's Web
+  # API via http_request, not through Home Assistant). Depends on
+  # popup_system.yaml being included before media_player_screen in the device
+  # config — already true.
+  spotify_queue_popup: !include ../popup/spotify_queue_popup.yaml
 
 globals:
   - id: media_elapsed_s
