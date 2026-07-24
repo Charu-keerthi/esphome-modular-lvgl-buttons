@@ -351,11 +351,20 @@ script:
           # time-range formatting and day filtering happens on-device in
           # on_success (12 > 8 rows because spillover events from adjacent
           # days get dropped there).
+          # The summary is stripped to ASCII (regex_replace drops every
+          # codepoint > 0x7F) before it goes into the payload: a non-ASCII
+          # char in the summary (e.g. an emoji like "🎥") otherwise makes HA
+          # fail to deliver this template result at all, so the popup hangs
+          # forever on "Loading..." (neither on_success nor on_error fires).
+          # Stripping also avoids the montserrat font's missing emoji glyphs.
+          # cal_fetch_dots needs no such guard — it never emits the summary.
           response_template: >-
             {% set evs = response['${calendar_entity}'].events | default([], true) | sort(attribute='start') %}
             {% set ns = namespace(items=[]) %}
             {% for e in evs[:12] %}
-            {% set ns.items = ns.items + [{'n': e.summary | default('(no title)', true), 's': e.start, 'e': e.end | default(e.start, true)}] %}
+            {% set nm = (e.summary | default('(no title)', true)) | regex_replace('[^\\x00-\\x7F]', '') | trim %}
+            {% set nm = nm if nm else '(no title)' %}
+            {% set ns.items = ns.items + [{'n': nm, 's': e.start, 'e': e.end | default(e.start, true)}] %}
             {% endfor %}
             {{ ns.items | tojson }}
           on_success:

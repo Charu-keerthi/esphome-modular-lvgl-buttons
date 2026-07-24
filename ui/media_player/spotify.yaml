@@ -62,7 +62,7 @@ script:
           id: sp_elapsed_label
           text: !lambda |-
             int s = id(sp_elapsed_s);
-            char buf[8];
+            char buf[16];
             snprintf(buf, sizeof(buf), "%02d:%02d", s / 60, s % 60);
             return std::string(buf);
 
@@ -71,7 +71,7 @@ script:
           text: !lambda |-
             int remain = id(sp_duration_s) - id(sp_elapsed_s);
             if (remain < 0) remain = 0;
-            char buf[10];
+            char buf[16];
             snprintf(buf, sizeof(buf), "-%02d:%02d", remain / 60, remain % 60);
             return std::string(buf);
 
