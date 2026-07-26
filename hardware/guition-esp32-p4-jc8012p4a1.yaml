@@ -18,7 +18,7 @@ substitutions:
   screen_width: ${800 if rotation | default("180") not in ["90", "270"] else 1280}
 
 esphome:
-  min_version: 2026.4.0
+  min_version: 2026.7.0
   project:
     name: "Guition.ESP32-P4-JC8012P4A1"
     version: "1.0"
@@ -139,7 +139,6 @@ display:
 # Special LVGL settings required for this display
 lvgl:
   rotation: ${rotation | default("180")}
-  byte_order: little_endian
   buffer_size: 100%
 
 # -------------------------------------------
