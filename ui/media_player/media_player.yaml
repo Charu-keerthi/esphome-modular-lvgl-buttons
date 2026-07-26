@@ -39,7 +39,10 @@ globals:
 
 online_image:
   - id: album_art
-    url: ${album_placeholder_url}
+    # update_interval: never means this initial url is never actually
+    # fetched — it only exists to satisfy online_image's required `url` key.
+    # No placeholder image is downloaded or shown; see media_art_url below.
+    url: ${ha_base_url}
     format: JPEG   # Change to PNG if your Home Assistant artwork endpoint serves PNG
     buffer_size: 65536  # increase download buffer to 65 KB
     type: RGB565
@@ -188,6 +191,7 @@ text_sensor:
           condition:
             lambda: return !x.empty();
           then:
+            - lvgl.widget.show: cover_art_image
             - online_image.set_url:
                 id: album_art
                 url: !lambda |-
@@ -197,10 +201,10 @@ text_sensor:
                   return std::string("${ha_base_url}") + x;
                 update: true
           else:
-            - online_image.set_url:
-                id: album_art
-                url: ${album_placeholder_url}
-                update: true
+            # No art available (nothing playing) — hide the image and free
+            # its buffer instead of showing a placeholder image.
+            - lvgl.widget.hide: cover_art_image
+            - online_image.release: album_art
 
   - platform: homeassistant
     id: media_position_text

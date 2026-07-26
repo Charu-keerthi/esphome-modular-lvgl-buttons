@@ -9,7 +9,6 @@
 # Required substitutions (defined in the device yaml):
 #   spotify_media_entity   HA entity, e.g. media_player.spotify_charu
 #   ha_base_url            prefix for relative entity_picture URLs
-#   album_placeholder_url  fallback art when nothing is playing
 #
 # Requires the mdi_icons_40 font glyphs: $mdi_home, $mdi_play, $mdi_pause,
 # $mdi_skip_previous, $mdi_skip_next, $mdi_volume_high, $mdi_spotify.
@@ -43,7 +42,10 @@ globals:
 
 online_image:
   - id: sp_album_art
-    url: ${album_placeholder_url}
+    # update_interval: never means this initial url is never actually
+    # fetched — it only exists to satisfy online_image's required `url` key.
+    # No placeholder image is downloaded or shown; see sp_art_url below.
+    url: ${ha_base_url}
     format: JPEG
     buffer_size: 65536
     type: RGB565
@@ -160,6 +162,7 @@ text_sensor:
           condition:
             lambda: return !x.empty();
           then:
+            - lvgl.widget.show: sp_cover_art
             - online_image.set_url:
                 id: sp_album_art
                 url: !lambda |-
@@ -169,10 +172,10 @@ text_sensor:
                   return std::string("${ha_base_url}") + x;
                 update: true
           else:
-            - online_image.set_url:
-                id: sp_album_art
-                url: ${album_placeholder_url}
-                update: true
+            # No art available (nothing playing) — hide the image and free
+            # its buffer instead of showing a placeholder image.
+            - lvgl.widget.hide: sp_cover_art
+            - online_image.release: sp_album_art
 
   - platform: homeassistant
     id: sp_position_text
