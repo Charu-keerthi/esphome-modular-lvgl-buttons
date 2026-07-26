@@ -40,8 +40,9 @@ globals:
     restore_value: no
     initial_value: 'false'
 
-online_image:
-  - id: sp_album_art
+image:
+  - platform: online_image
+    id: sp_album_art
     # update_interval: never means this initial url is never actually
     # fetched — it only exists to satisfy online_image's required `url` key.
     # No placeholder image is downloaded or shown; see sp_art_url below.
