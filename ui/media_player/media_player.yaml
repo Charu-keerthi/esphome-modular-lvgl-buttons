@@ -16,6 +16,37 @@ packages:
   # config — already true.
   spotify_queue_popup: !include ../popup/spotify_queue_popup.yaml
 
+# Custom fonts for labels that render free-text song/artist/queue names
+# (from Home Assistant/Spotify, so may be in any language) — LVGL's
+# built-in montserrat_* fonts only cover ASCII and drop characters like
+# ü/ö/ä/ß/é/ñ. Reuses the Nunito TTF already vendored for the boot screen,
+# widened to the GF_Latin_Core glyphset (superset of ASCII + accented
+# Latin). Declared here rather than common/theme/fonts.yaml since it's
+# specific to media playback; spotify.yaml, queue_popup.yaml and
+# spotify_queue_popup.yaml reference these IDs directly the same way they
+# already reuse this file's action_style/card_style.
+font:
+  - file: "esphome-modular-lvgl-buttons/assets/fonts/Nunito-SemiBold.ttf"
+    id: nunito_16_latin
+    size: 16
+    bpp: 8
+    glyphsets: GF_Latin_Core
+  - file: "esphome-modular-lvgl-buttons/assets/fonts/Nunito-SemiBold.ttf"
+    id: nunito_18_latin
+    size: 18
+    bpp: 8
+    glyphsets: GF_Latin_Core
+  - file: "esphome-modular-lvgl-buttons/assets/fonts/Nunito-SemiBold.ttf"
+    id: nunito_20_latin
+    size: 20
+    bpp: 8
+    glyphsets: GF_Latin_Core
+  - file: "esphome-modular-lvgl-buttons/assets/fonts/Nunito-SemiBold.ttf"
+    id: nunito_22_latin
+    size: 22
+    bpp: 8
+    glyphsets: GF_Latin_Core
+
 globals:
   - id: media_elapsed_s
     type: int
@@ -360,7 +391,7 @@ lvgl:
                   height: 30         # bound to one line so long_mode:dot truncates instead of wrapping
                   long_mode: dot     # truncate long titles with an ellipsis instead of wrapping
                   text: "Nothing playing"
-                  text_font: montserrat_22
+                  text_font: nunito_22_latin
 
               - label:
                   id: song_artist_label
@@ -370,7 +401,7 @@ lvgl:
                   height: 26         # bound to one line so long_mode:dot truncates instead of wrapping
                   long_mode: dot     # truncate long artist names so they don't overrun the State label
                   text: "Unknown artist"
-                  text_font: montserrat_18
+                  text_font: nunito_18_latin
 
               - label:
                   x: 0

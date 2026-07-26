@@ -273,13 +273,17 @@ lvgl:
                             id: queue_item_0
                             align: left_mid
                             width: 100%
-                            # Bound to two lines of nunito_20 (~28px each) so long_mode:dot
-                            # wraps at most two lines and ellipsizes the rest instead of
-                            # overflowing the button with a third line.
+                            # Bound to two lines of nunito_20_latin (~27px each) so
+                            # long_mode:dot wraps at most two lines and ellipsizes the
+                            # rest instead of overflowing the button with a third line.
                             height: 56
                             long_mode: dot
                             text: ""
                             text_color: 0xF2F0EB
+                            # Track/artist names may be non-English; the GF_Latin_Core
+                            # font (media_player.yaml) covers that, montserrat_14 (this
+                            # widget's default_font) doesn't.
+                            text_font: nunito_20_latin
                       on_click:
                         - lambda: 'id(mp_selected_qid) = id(mp_qid_0);'
                         - script.execute: mp_play_item
@@ -294,13 +298,17 @@ lvgl:
                             id: queue_item_1
                             align: left_mid
                             width: 100%
-                            # Bound to two lines of nunito_20 (~28px each) so long_mode:dot
-                            # wraps at most two lines and ellipsizes the rest instead of
-                            # overflowing the button with a third line.
+                            # Bound to two lines of nunito_20_latin (~27px each) so
+                            # long_mode:dot wraps at most two lines and ellipsizes the
+                            # rest instead of overflowing the button with a third line.
                             height: 56
                             long_mode: dot
                             text: ""
                             text_color: 0xF2F0EB
+                            # Track/artist names may be non-English; the GF_Latin_Core
+                            # font (media_player.yaml) covers that, montserrat_14 (this
+                            # widget's default_font) doesn't.
+                            text_font: nunito_20_latin
                       on_click:
                         - lambda: 'id(mp_selected_qid) = id(mp_qid_1);'
                         - script.execute: mp_play_item
@@ -315,13 +323,17 @@ lvgl:
                             id: queue_item_2
                             align: left_mid
                             width: 100%
-                            # Bound to two lines of nunito_20 (~28px each) so long_mode:dot
-                            # wraps at most two lines and ellipsizes the rest instead of
-                            # overflowing the button with a third line.
+                            # Bound to two lines of nunito_20_latin (~27px each) so
+                            # long_mode:dot wraps at most two lines and ellipsizes the
+                            # rest instead of overflowing the button with a third line.
                             height: 56
                             long_mode: dot
                             text: ""
                             text_color: 0xF2F0EB
+                            # Track/artist names may be non-English; the GF_Latin_Core
+                            # font (media_player.yaml) covers that, montserrat_14 (this
+                            # widget's default_font) doesn't.
+                            text_font: nunito_20_latin
                       on_click:
                         - lambda: 'id(mp_selected_qid) = id(mp_qid_2);'
                         - script.execute: mp_play_item
@@ -336,13 +348,17 @@ lvgl:
                             id: queue_item_3
                             align: left_mid
                             width: 100%
-                            # Bound to two lines of nunito_20 (~28px each) so long_mode:dot
-                            # wraps at most two lines and ellipsizes the rest instead of
-                            # overflowing the button with a third line.
+                            # Bound to two lines of nunito_20_latin (~27px each) so
+                            # long_mode:dot wraps at most two lines and ellipsizes the
+                            # rest instead of overflowing the button with a third line.
                             height: 56
                             long_mode: dot
                             text: ""
                             text_color: 0xF2F0EB
+                            # Track/artist names may be non-English; the GF_Latin_Core
+                            # font (media_player.yaml) covers that, montserrat_14 (this
+                            # widget's default_font) doesn't.
+                            text_font: nunito_20_latin
                       on_click:
                         - lambda: 'id(mp_selected_qid) = id(mp_qid_3);'
                         - script.execute: mp_play_item
@@ -357,13 +373,17 @@ lvgl:
                             id: queue_item_4
                             align: left_mid
                             width: 100%
-                            # Bound to two lines of nunito_20 (~28px each) so long_mode:dot
-                            # wraps at most two lines and ellipsizes the rest instead of
-                            # overflowing the button with a third line.
+                            # Bound to two lines of nunito_20_latin (~27px each) so
+                            # long_mode:dot wraps at most two lines and ellipsizes the
+                            # rest instead of overflowing the button with a third line.
                             height: 56
                             long_mode: dot
                             text: ""
                             text_color: 0xF2F0EB
+                            # Track/artist names may be non-English; the GF_Latin_Core
+                            # font (media_player.yaml) covers that, montserrat_14 (this
+                            # widget's default_font) doesn't.
+                            text_font: nunito_20_latin
                       on_click:
                         - lambda: 'id(mp_selected_qid) = id(mp_qid_4);'
                         - script.execute: mp_play_item
@@ -378,13 +398,17 @@ lvgl:
                             id: queue_item_5
                             align: left_mid
                             width: 100%
-                            # Bound to two lines of nunito_20 (~28px each) so long_mode:dot
-                            # wraps at most two lines and ellipsizes the rest instead of
-                            # overflowing the button with a third line.
+                            # Bound to two lines of nunito_20_latin (~27px each) so
+                            # long_mode:dot wraps at most two lines and ellipsizes the
+                            # rest instead of overflowing the button with a third line.
                             height: 56
                             long_mode: dot
                             text: ""
                             text_color: 0xF2F0EB
+                            # Track/artist names may be non-English; the GF_Latin_Core
+                            # font (media_player.yaml) covers that, montserrat_14 (this
+                            # widget's default_font) doesn't.
+                            text_font: nunito_20_latin
                       on_click:
                         - lambda: 'id(mp_selected_qid) = id(mp_qid_5);'
                         - script.execute: mp_play_item
@@ -399,13 +423,17 @@ lvgl:
                             id: queue_item_6
                             align: left_mid
                             width: 100%
-                            # Bound to two lines of nunito_20 (~28px each) so long_mode:dot
-                            # wraps at most two lines and ellipsizes the rest instead of
-                            # overflowing the button with a third line.
+                            # Bound to two lines of nunito_20_latin (~27px each) so
+                            # long_mode:dot wraps at most two lines and ellipsizes the
+                            # rest instead of overflowing the button with a third line.
                             height: 56
                             long_mode: dot
                             text: ""
                             text_color: 0xF2F0EB
+                            # Track/artist names may be non-English; the GF_Latin_Core
+                            # font (media_player.yaml) covers that, montserrat_14 (this
+                            # widget's default_font) doesn't.
+                            text_font: nunito_20_latin
                       on_click:
                         - lambda: 'id(mp_selected_qid) = id(mp_qid_6);'
                         - script.execute: mp_play_item
@@ -420,13 +448,17 @@ lvgl:
                             id: queue_item_7
                             align: left_mid
                             width: 100%
-                            # Bound to two lines of nunito_20 (~28px each) so long_mode:dot
-                            # wraps at most two lines and ellipsizes the rest instead of
-                            # overflowing the button with a third line.
+                            # Bound to two lines of nunito_20_latin (~27px each) so
+                            # long_mode:dot wraps at most two lines and ellipsizes the
+                            # rest instead of overflowing the button with a third line.
                             height: 56
                             long_mode: dot
                             text: ""
                             text_color: 0xF2F0EB
+                            # Track/artist names may be non-English; the GF_Latin_Core
+                            # font (media_player.yaml) covers that, montserrat_14 (this
+                            # widget's default_font) doesn't.
+                            text_font: nunito_20_latin
                       on_click:
                         - lambda: 'id(mp_selected_qid) = id(mp_qid_7);'
                         - script.execute: mp_play_item
@@ -441,13 +473,17 @@ lvgl:
                             id: queue_item_8
                             align: left_mid
                             width: 100%
-                            # Bound to two lines of nunito_20 (~28px each) so long_mode:dot
-                            # wraps at most two lines and ellipsizes the rest instead of
-                            # overflowing the button with a third line.
+                            # Bound to two lines of nunito_20_latin (~27px each) so
+                            # long_mode:dot wraps at most two lines and ellipsizes the
+                            # rest instead of overflowing the button with a third line.
                             height: 56
                             long_mode: dot
                             text: ""
                             text_color: 0xF2F0EB
+                            # Track/artist names may be non-English; the GF_Latin_Core
+                            # font (media_player.yaml) covers that, montserrat_14 (this
+                            # widget's default_font) doesn't.
+                            text_font: nunito_20_latin
                       on_click:
                         - lambda: 'id(mp_selected_qid) = id(mp_qid_8);'
                         - script.execute: mp_play_item
@@ -462,13 +498,17 @@ lvgl:
                             id: queue_item_9
                             align: left_mid
                             width: 100%
-                            # Bound to two lines of nunito_20 (~28px each) so long_mode:dot
-                            # wraps at most two lines and ellipsizes the rest instead of
-                            # overflowing the button with a third line.
+                            # Bound to two lines of nunito_20_latin (~27px each) so
+                            # long_mode:dot wraps at most two lines and ellipsizes the
+                            # rest instead of overflowing the button with a third line.
                             height: 56
                             long_mode: dot
                             text: ""
                             text_color: 0xF2F0EB
+                            # Track/artist names may be non-English; the GF_Latin_Core
+                            # font (media_player.yaml) covers that, montserrat_14 (this
+                            # widget's default_font) doesn't.
+                            text_font: nunito_20_latin
                       on_click:
                         - lambda: 'id(mp_selected_qid) = id(mp_qid_9);'
                         - script.execute: mp_play_item

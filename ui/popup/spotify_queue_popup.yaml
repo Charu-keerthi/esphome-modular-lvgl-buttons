@@ -381,6 +381,10 @@ lvgl:
                             long_mode: dot
                             text: ""
                             text_color: 0xF2F0EB
+                            # Track/artist names may be non-English; the GF_Latin_Core
+                            # font (media_player.yaml) covers that, montserrat_14 (this
+                            # widget's default_font) doesn't.
+                            text_font: nunito_20_latin
                   - obj:
                       id: sp_queue_row_1
                       hidden: true
@@ -396,6 +400,10 @@ lvgl:
                             long_mode: dot
                             text: ""
                             text_color: 0xF2F0EB
+                            # Track/artist names may be non-English; the GF_Latin_Core
+                            # font (media_player.yaml) covers that, montserrat_14 (this
+                            # widget's default_font) doesn't.
+                            text_font: nunito_20_latin
                   - obj:
                       id: sp_queue_row_2
                       hidden: true
@@ -411,6 +419,10 @@ lvgl:
                             long_mode: dot
                             text: ""
                             text_color: 0xF2F0EB
+                            # Track/artist names may be non-English; the GF_Latin_Core
+                            # font (media_player.yaml) covers that, montserrat_14 (this
+                            # widget's default_font) doesn't.
+                            text_font: nunito_20_latin
                   - obj:
                       id: sp_queue_row_3
                       hidden: true
@@ -426,6 +438,10 @@ lvgl:
                             long_mode: dot
                             text: ""
                             text_color: 0xF2F0EB
+                            # Track/artist names may be non-English; the GF_Latin_Core
+                            # font (media_player.yaml) covers that, montserrat_14 (this
+                            # widget's default_font) doesn't.
+                            text_font: nunito_20_latin
                   - obj:
                       id: sp_queue_row_4
                       hidden: true
@@ -441,6 +457,10 @@ lvgl:
                             long_mode: dot
                             text: ""
                             text_color: 0xF2F0EB
+                            # Track/artist names may be non-English; the GF_Latin_Core
+                            # font (media_player.yaml) covers that, montserrat_14 (this
+                            # widget's default_font) doesn't.
+                            text_font: nunito_20_latin
                   - obj:
                       id: sp_queue_row_5
                       hidden: true
@@ -456,6 +476,10 @@ lvgl:
                             long_mode: dot
                             text: ""
                             text_color: 0xF2F0EB
+                            # Track/artist names may be non-English; the GF_Latin_Core
+                            # font (media_player.yaml) covers that, montserrat_14 (this
+                            # widget's default_font) doesn't.
+                            text_font: nunito_20_latin
                   - obj:
                       id: sp_queue_row_6
                       hidden: true
@@ -471,6 +495,10 @@ lvgl:
                             long_mode: dot
                             text: ""
                             text_color: 0xF2F0EB
+                            # Track/artist names may be non-English; the GF_Latin_Core
+                            # font (media_player.yaml) covers that, montserrat_14 (this
+                            # widget's default_font) doesn't.
+                            text_font: nunito_20_latin
                   - obj:
                       id: sp_queue_row_7
                       hidden: true
@@ -486,6 +514,10 @@ lvgl:
                             long_mode: dot
                             text: ""
                             text_color: 0xF2F0EB
+                            # Track/artist names may be non-English; the GF_Latin_Core
+                            # font (media_player.yaml) covers that, montserrat_14 (this
+                            # widget's default_font) doesn't.
+                            text_font: nunito_20_latin
                   - obj:
                       id: sp_queue_row_8
                       hidden: true
@@ -501,6 +533,10 @@ lvgl:
                             long_mode: dot
                             text: ""
                             text_color: 0xF2F0EB
+                            # Track/artist names may be non-English; the GF_Latin_Core
+                            # font (media_player.yaml) covers that, montserrat_14 (this
+                            # widget's default_font) doesn't.
+                            text_font: nunito_20_latin
                   - obj:
                       id: sp_queue_row_9
                       hidden: true
@@ -516,3 +552,7 @@ lvgl:
                             long_mode: dot
                             text: ""
                             text_color: 0xF2F0EB
+                            # Track/artist names may be non-English; the GF_Latin_Core
+                            # font (media_player.yaml) covers that, montserrat_14 (this
+                            # widget's default_font) doesn't.
+                            text_font: nunito_20_latin
